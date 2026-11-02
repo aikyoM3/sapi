@@ -1,0 +1,16 @@
+{
+  "retailer": "sapi-mock",
+  "retailerName": "Cửa hàng SAPI Mock",
+  "branches": [
+    { "id": 91001, "branchName": "Chi nhánh Mock", "address": "123 Đường Kiểm Thử", "contactNumber": "0900000000", "modifiedDate": "2026-09-07T00:00:00Z" }
+  ],
+  "categories": [
+    { "categoryId": 92001, "categoryName": "Hàng hóa Mock", "parentId": null, "modifiedDate": "2026-09-07T00:00:00Z" }
+  ],
+  "suppliers": [
+    { "id": 93001, "code": "NCC-MOCK", "name": "Nhà cung cấp Mock", "contactNumber": "0911111111", "address": "456 Đường Mock", "modifiedDate": "2026-09-07T00:00:00Z" }
+  ],
+  "products": [
+    { "id": 94001, "code": "SP-MOCK-01", "name": "Sản phẩm Mock", "unit": "Cái", "onHand": 20, "categoryId": 92001, "modifiedDate": "2026-09-07T00:00:00Z" }
+  ]
+}

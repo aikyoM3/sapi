@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sửa hóa đơn - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+    <style>
+      .invoice-table{min-width:1180px;table-layout:fixed}.invoice-table th{font-size:.72rem;white-space:normal;background:var(--tblr-bg-surface-secondary)}
+      .invoice-table td{vertical-align:top}.invoice-table .col-index{width:4%}.invoice-table .col-name{width:19%}.invoice-table .col-map{width:22%}.invoice-table .col-qty{width:7%}.invoice-table .col-unit{width:9%}.invoice-table .col-price{width:11%}.invoice-table .col-total{width:12%}
+      .read-name{white-space:normal;overflow-wrap:anywhere;line-height:1.35}.suggestion-wrap{position:relative}.suggestions{position:absolute;z-index:20;left:0;right:0;top:100%;max-height:240px;overflow:auto;background:white;border:1px solid var(--tblr-border-color);box-shadow:var(--tblr-box-shadow);display:none}.suggestions.show{display:block}.suggestion{padding:.55rem .75rem;cursor:pointer}.suggestion:hover{background:var(--tblr-bg-surface-secondary)}
+      .summary{width:min(100%,420px);margin-left:auto}.summary-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0}.summary-total{border-top:1px solid var(--tblr-border-color);font-size:1.15rem;font-weight:700}.invoice-images{display:flex;gap:1rem;overflow:auto}.invoice-images figure{min-width:260px;margin:0}.invoice-images img{width:260px;height:340px;object-fit:contain;background:#f1f3f5}
+      #gemini-dialog{width:min(90vw,800px);max-height:80vh;border:1px solid var(--tblr-border-color);border-radius:.5rem}#gemini-dialog pre{white-space:pre-wrap}
+    </style>
+  </head>
+  <body><div class="page">
+    <header class="navbar"><div class="container-xl"><a class="navbar-brand fw-bold fs-2 text-primary" href="./index.html">SAPI</a><div class="ms-auto d-flex align-items-center gap-3"><span data-account-name class="text-secondary"></span><button data-logout class="btn btn-outline-secondary btn-sm">Đăng xuất</button></div></div></header>
+    <div class="page-wrapper"><div class="page-header"><div class="container-xl"><div class="row align-items-center"><div class="col"><h2 class="page-title">Sửa hóa đơn</h2></div><div class="col-auto btn-list"><button id="view-gemini" class="btn btn-outline-secondary">Xem JSON OCR</button><a id="back-upload" class="btn btn-outline-primary" href="./upload-invoice.html">Phiên ảnh mới</a></div></div></div></div>
+      <div class="page-body"><div class="container-xl">
+        <div id="notice" class="alert alert-info">Đang tải dữ liệu phiên hóa đơn…</div>
+        <div class="card mb-4"><div class="card-header"><h3 class="card-title">Ảnh hóa đơn</h3></div><div id="invoice-images" class="card-body invoice-images"></div></div>
+        <div class="card mb-4"><div class="card-header"><h3 class="card-title">Thông tin nhập hàng</h3></div><div class="card-body"><div class="row g-4">
+          <div class="col-lg-5"><h4 class="text-secondary">Bên bán đọc được</h4><dl class="row mb-0"><dt class="col-4">Nhà cung cấp</dt><dd id="read-supplier" class="col-8">—</dd><dt class="col-4">Điện thoại</dt><dd id="read-phone" class="col-8">—</dd><dt class="col-4">Địa chỉ</dt><dd id="read-address" class="col-8">—</dd></dl></div>
+          <div class="col-lg-7"><div class="row g-3">
+            <div class="col-12"><label class="form-label">Nhà cung cấp sử dụng</label><div class="suggestion-wrap"><input id="supplier-name" class="form-control" autocomplete="off" placeholder="Nhập hoặc chọn nhà cung cấp" /><div id="supplier-suggestions" class="suggestions"></div></div><input id="supplier-id" type="hidden" /></div>
+            <div class="col-md-6"><label class="form-label">Số điện thoại</label><input id="supplier-phone" class="form-control" /></div><div class="col-md-6"><label class="form-label">Địa chỉ</label><input id="supplier-address" class="form-control" /></div>
+            <div class="col-md-6"><label class="form-label">Số hóa đơn</label><input id="invoice-number" class="form-control" /></div><div class="col-md-6"><label class="form-label">Ngày hóa đơn</label><input id="invoice-date" class="form-control" type="date" /></div>
+          </div></div>
+        </div></div></div>
+        <div class="card"><div class="card-header"><h3 class="card-title">Nội dung hóa đơn</h3></div><div class="table-responsive"><table class="table table-bordered table-striped table-hover invoice-table mb-0">
+          <thead><tr><th class="col-index text-center">STT</th><th class="col-name">Tên hàng đọc được</th><th class="col-map">Tên hàng tương ứng</th><th class="col-qty text-end">SL đọc được</th><th class="col-qty text-end">SL sử dụng</th><th class="col-unit">Đơn vị đọc được</th><th class="col-unit">Đơn vị sử dụng</th><th class="col-price text-end">Đơn giá</th><th class="col-total text-end">Thành tiền</th></tr></thead>
+          <tbody id="items"></tbody><tfoot><tr><th colspan="8" class="text-end">Tổng tiền hàng</th><th id="table-subtotal" class="text-end">0</th></tr></tfoot>
+        </table></div><div class="card-body"><div class="summary"><div class="summary-row"><span>Tổng tiền hàng</span><strong id="subtotal">0</strong></div><div class="summary-row"><label for="discount">Tổng giá trị chiết khấu</label><input id="discount" class="form-control text-end" type="number" min="0" step="0.01" value="0" style="max-width:180px" /></div><div class="summary-row summary-total"><span>Tổng thanh toán</span><span id="grand-total">0</span></div></div></div>
+          <div class="card-footer d-flex justify-content-end"><button id="confirm" class="btn btn-primary">Xác nhận hóa đơn</button></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+  <dialog id="gemini-dialog"><div class="d-flex justify-content-between mb-3"><strong>OCR result</strong><button id="close-gemini" class="btn btn-sm btn-outline-secondary">Đóng</button></div><pre id="gemini-json"></pre></dialog>
+  <script src="./app.js"></script>
+  <script>
+    const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+    const sessionToken = new URLSearchParams(location.search).get('session');
+    const itemsBody = document.querySelector('#items');
+    let extraction = null;
+    const numberValue = (element) => Math.max(0, Number(element.value) || 0);
+    const text = (value) => value === null || value === undefined ? '' : String(value);
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, options);
+      if (response.status === 401) { location.href = '/login.html'; throw new Error('Bạn cần đăng nhập.'); }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Không thể xử lý yêu cầu.');
+      return payload;
+    }
+    function debounce(callback, wait = 320) { let timeout; return (...args) => { clearTimeout(timeout); timeout = setTimeout(() => callback(...args), wait); }; }
+    function buildSuggestions(input, container, endpoint, onSelect) {
+      const search = debounce(async () => {
+        const query = input.value.trim(); input.dataset.selectedId = ''; if (query.length < 2) { container.classList.remove('show'); return; }
+        try {
+          const results = await api(`${endpoint}?q=${encodeURIComponent(query)}`); container.replaceChildren();
+          results.forEach((result) => {
+            const option = document.createElement('div'); option.className = 'suggestion'; option.textContent = result.product_name || result.supplier_name;
+            if (result.matched_external_names?.length) { const note = document.createElement('small'); note.className = 'd-block text-secondary'; note.textContent = `Khớp: ${result.matched_external_names.join(', ')}`; option.append(note); }
+            option.addEventListener('mousedown', (event) => { event.preventDefault(); onSelect(result); container.classList.remove('show'); }); container.append(option);
+          });
+          container.classList.toggle('show', results.length > 0);
+        } catch { container.classList.remove('show'); }
+      });
+      input.addEventListener('input', search); input.addEventListener('blur', () => setTimeout(() => container.classList.remove('show'), 150));
+    }
+    function createInput(className, value, type = 'text') { const input = document.createElement('input'); input.className = `form-control ${className}`; input.type = type; input.value = text(value); if (type === 'number') { input.min = '0'; input.step = '0.01'; } return input; }
+    function td(content, className = '') { const cell = document.createElement('td'); cell.className = className; if (content instanceof HTMLElement) cell.append(content); else cell.textContent = text(content); return cell; }
+    function addItem(item, mapped, index) {
+      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name);
+      const productWrap = document.createElement('div'); productWrap.className = 'suggestion-wrap';
+      const productInput = createInput('product-name', mapped?.name); productInput.dataset.productId = text(mapped?.product_id);
+      const suggestions = document.createElement('div'); suggestions.className = 'suggestions'; productWrap.append(productInput, suggestions);
+      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; const unit = row.querySelector('.line-unit'); if (!unit.value && product.primary_unit) unit.value = product.primary_unit; });
+      row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), td(createInput('line-price text-end', mapped?.unit_price ?? item.unit_price, 'number')));
+      const total = document.createElement('strong'); total.className = 'line-total'; row.append(td(total, 'text-end')); itemsBody.append(row);
+    }
+    function updateTotals() {
+      let subtotal = 0; document.querySelectorAll('.invoice-line').forEach((row) => { const total = numberValue(row.querySelector('.line-quantity')) * numberValue(row.querySelector('.line-price')); row.querySelector('.line-total').textContent = money.format(total); subtotal += total; });
+      const discount = numberValue(document.querySelector('#discount')); document.querySelector('#table-subtotal').textContent = money.format(subtotal); document.querySelector('#subtotal').textContent = money.format(subtotal); document.querySelector('#grand-total').textContent = money.format(Math.max(0, subtotal - discount));
+    }
+    function populate(payload) {
+      extraction = payload.extraction; const gemini = extraction.gemini; const mapped = extraction.corresponding || {}; const supplier = gemini.supplier || {}; const invoice = gemini.invoice || {};
+      document.querySelector('#read-supplier').textContent = text(supplier.name) || '—'; document.querySelector('#read-phone').textContent = text(supplier.phone) || '—'; document.querySelector('#read-address').textContent = text(supplier.address) || '—';
+      document.querySelector('#supplier-id').value = text(mapped.supplier?.supplier_id); document.querySelector('#supplier-name').value = text(mapped.supplier?.name || supplier.name); document.querySelector('#supplier-phone').value = text(mapped.supplier?.phone || supplier.phone); document.querySelector('#supplier-address').value = text(mapped.supplier?.address || supplier.address); document.querySelector('#invoice-number').value = text(mapped.invoice?.number || invoice.number); document.querySelector('#invoice-date').value = text(mapped.invoice?.date || invoice.date);
+      (gemini.items?.length ? gemini.items : [{}]).forEach((item, index) => addItem(item, mapped.items?.[index], index));
+      const imageBox = document.querySelector('#invoice-images'); payload.images.forEach((image) => { const figure = document.createElement('figure'); const img = document.createElement('img'); img.src = image.url; img.alt = `Trang ${image.pageNumber}`; const caption = document.createElement('figcaption'); caption.className = 'text-center mt-2'; caption.textContent = `Trang ${image.pageNumber}`; figure.append(img, caption); imageBox.append(figure); });
+      document.querySelector('#gemini-json').textContent = JSON.stringify(gemini, null, 2); document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Kiểm tra dữ liệu OCR, chọn hàng hóa tương ứng rồi xác nhận. Thành tiền được tính từ SL sử dụng × Đơn giá.'; updateTotals();
+    }
+    buildSuggestions(document.querySelector('#supplier-name'), document.querySelector('#supplier-suggestions'), '/api/suppliers/search', (supplier) => { document.querySelector('#supplier-id').value = supplier.supplier_id; document.querySelector('#supplier-name').value = supplier.supplier_name; document.querySelector('#supplier-phone').value = text(supplier.phone_number); document.querySelector('#supplier-address').value = text(supplier.address); });
+    document.querySelector('#supplier-name').addEventListener('input', () => { document.querySelector('#supplier-id').value = ''; });
+    itemsBody.addEventListener('input', updateTotals); document.querySelector('#discount').addEventListener('input', updateTotals);
+    document.querySelector('#view-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').showModal()); document.querySelector('#close-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').close());
+    document.querySelector('#confirm').addEventListener('click', async () => {
+      const button = document.querySelector('#confirm'); button.disabled = true; document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Đang tạo phiếu nhập nháp trên KiotViet…';
+      try {
+        const items = Array.from(document.querySelectorAll('.invoice-line')).map((row) => ({ productId: Number(row.querySelector('.product-name').dataset.productId), externalName: row.dataset.externalName, quantity: row.querySelector('.line-quantity').value, unit: row.querySelector('.line-unit').value, unitPrice: row.querySelector('.line-price').value }));
+        const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierId: Number(document.querySelector('#supplier-id').value) || null, supplierName: document.querySelector('#supplier-name').value, supplierPhone: document.querySelector('#supplier-phone').value, supplierAddress: document.querySelector('#supplier-address').value, invoiceNumber: document.querySelector('#invoice-number').value, invoiceDate: document.querySelector('#invoice-date').value || null, discountAmount: document.querySelector('#discount').value, items }) });
+        document.querySelector('#notice').className = `alert alert-${result.status === 'SYNCED' ? 'success' : 'warning'}`;
+        document.querySelector('#notice').textContent = result.status === 'SYNCED'
+          ? `Đã lưu hóa đơn #${result.invoiceId} và tạo phiếu nhập KiotViet ${result.kiotVietPurchaseOrderCode || `#${result.kiotVietPurchaseOrderId}`}.`
+          : result.warning;
+        setTimeout(() => location.href = '/index.html', 1400);
+      } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; button.disabled = false; }
+    });
+    (async () => { if (!sessionToken) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = 'Thiếu token phiên hóa đơn.'; return; } try { const payload = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}`); if (payload.status !== 'READY_FOR_REVIEW') throw new Error('Phiên chưa sẵn sàng để hiệu chỉnh.'); populate(payload); } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; } })();
+  </script>
+  </body>
+</html>

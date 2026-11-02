@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Đăng ký - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+  </head>
+  <body class="d-flex flex-column bg-light"><div class="page page-center"><div class="container container-tight py-4">
+    <div class="text-center mb-4"><span class="fs-1 fw-bold text-primary">SAPI</span></div>
+    <form id="register-form" class="card card-md" autocomplete="on"><div class="card-body">
+      <h2 class="h2 text-center mb-4">Đăng ký tài khoản SAPI</h2>
+      <div class="mb-3"><label class="form-label" for="username">Tên đăng nhập</label><input id="username" class="form-control" type="text" autocomplete="username" minlength="3" maxlength="50" pattern="[A-Za-z0-9._-]+" required /><small class="form-hint">3–50 ký tự: chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.</small></div>
+      <div class="mb-3"><label class="form-label" for="password">Mật khẩu</label><input id="password" class="form-control" type="password" autocomplete="new-password" minlength="8" required /><small class="form-hint">Ít nhất 8 ký tự.</small></div>
+      <div class="mb-2"><label class="form-label" for="confirm-password">Nhập lại mật khẩu</label><input id="confirm-password" class="form-control" type="password" autocomplete="new-password" minlength="8" required /></div>
+      <div id="register-message" class="mt-3" role="alert"></div>
+      <div class="form-footer"><button id="submit-button" class="btn btn-primary w-100" type="submit">Đăng ký</button></div>
+    </div></form>
+    <div class="text-center text-secondary mt-3">Đã có tài khoản? <a href="/login.html">Đăng nhập</a></div>
+  </div></div>
+  <script>
+    const form = document.querySelector('#register-form'); const message = document.querySelector('#register-message'); const submitButton = document.querySelector('#submit-button');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); message.textContent = '';
+      const password = document.querySelector('#password').value; if (password !== document.querySelector('#confirm-password').value) { message.className = 'text-danger mt-3'; message.textContent = 'Mật khẩu nhập lại không khớp.'; return; }
+      submitButton.disabled = true;
+      try {
+        const response = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: document.querySelector('#username').value, password }) });
+        const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || 'Không thể đăng ký.');
+        message.className = 'text-success mt-3'; message.textContent = payload.message; setTimeout(() => window.location.replace('/login.html'), 700);
+      } catch (error) { message.className = 'text-danger mt-3'; message.textContent = error.message; submitButton.disabled = false; }
+    });
+  </script>
+  </body>
+</html>

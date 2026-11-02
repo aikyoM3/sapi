@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Phiên hóa đơn - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+    <style>.preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem}.preview-card img{width:100%;height:220px;object-fit:contain;background:#f1f3f5}.qr-image{width:280px;max-width:100%;image-rendering:auto}</style>
+  </head>
+  <body><div class="page">
+    <header class="navbar navbar-expand-md"><div class="container-xl"><a class="navbar-brand fw-bold fs-2 text-primary" href="./index.html">SAPI</a><div class="ms-auto d-flex align-items-center gap-3"><span data-account-name class="text-secondary"></span><button data-logout class="btn btn-outline-secondary btn-sm">Đăng xuất</button></div></div></header>
+    <div class="page-wrapper"><div class="page-header"><div class="container-xl"><div class="row align-items-center"><div class="col"><h2 class="page-title">Nhập ảnh hóa đơn</h2></div><div class="col-auto"><a class="btn btn-outline-secondary" href="./index.html">Quay lại</a></div></div></div></div>
+      <div class="page-body"><div class="container-xl"><div class="row g-4">
+        <div class="col-lg-8"><div class="card"><div class="card-header"><h3 class="card-title">Các trang hóa đơn</h3></div><div class="card-body">
+          <p class="text-secondary">Chọn một hoặc nhiều ảnh, kiểm tra preview, bấm <strong>Upload</strong> để thêm vào phiên. Chỉ bấm <strong>Gửi ảnh</strong> khi đã đủ tất cả trang.</p>
+          <input id="image-input" class="form-control" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+          <div class="btn-list mt-3"><button id="upload" class="btn btn-outline-primary" disabled>Upload</button><button id="choose-again" class="btn btn-outline-secondary">Upload lại / chọn lại</button><button id="process" class="btn btn-primary" disabled>Gửi ảnh</button></div>
+          <div id="local-previews" class="preview-grid mt-4"></div>
+          <div id="status" class="alert alert-info mt-4 mb-0" role="status">Đang tạo phiên hóa đơn…</div>
+        </div></div></div>
+        <div class="col-lg-4"><div class="card"><div class="card-header"><h3 class="card-title">Chụp bằng điện thoại</h3></div><div class="card-body text-center">
+          <p class="text-secondary">Điện thoại và máy tính cần truy cập được cùng địa chỉ của ứng dụng.</p>
+          <img id="qr" class="qr-image d-none mx-auto" alt="QR upload hóa đơn" />
+          <div id="mobile-url" class="small text-break mt-2"></div>
+        </div></div></div>
+      </div></div></div>
+    </div>
+  </div>
+  <script src="./app.js"></script>
+  <script>
+    const input = document.querySelector('#image-input');
+    const uploadButton = document.querySelector('#upload');
+    const processButton = document.querySelector('#process');
+    const statusBox = document.querySelector('#status');
+    const previewGrid = document.querySelector('#local-previews');
+    let sessionToken = null;
+    let selectedFiles = [];
+    let pollTimer = null;
+    const requestedSession = new URLSearchParams(location.search).get('session');
+
+    async function api(url, options = {}) {
+      const response = await fetch(url, options);
+      if (response.status === 401) { location.href = '/login.html'; throw new Error('Bạn cần đăng nhập.'); }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Không thể xử lý yêu cầu.');
+      return payload;
+    }
+    function showStatus(message, type = 'info') { statusBox.className = `alert alert-${type} mt-4 mb-0`; statusBox.textContent = message; }
+    function renderLocalPreviews() {
+      previewGrid.replaceChildren();
+      selectedFiles.forEach((file, index) => {
+        const card = document.createElement('div'); card.className = 'card preview-card';
+        const image = document.createElement('img'); image.src = URL.createObjectURL(file); image.alt = `Ảnh đã chọn ${index + 1}`; image.onload = () => URL.revokeObjectURL(image.src);
+        const label = document.createElement('div'); label.className = 'card-body p-2 text-truncate'; label.textContent = file.name;
+        card.append(image, label); previewGrid.append(card);
+      });
+      uploadButton.disabled = !sessionToken || !selectedFiles.length;
+    }
+    async function refreshStatus() {
+      if (!sessionToken) return;
+      try {
+        const state = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/status`);
+        processButton.disabled = state.imageCount < 1 || state.status === 'PROCESSING';
+        if (state.status === 'PROCESSING') showStatus(`Gemini đang xử lý ${state.imageCount} trang…`);
+        else if (state.status === 'READY_FOR_REVIEW') { clearInterval(pollTimer); location.href = `/invoice-correction.html?session=${encodeURIComponent(sessionToken)}`; }
+        else if (state.status === 'FAILED') showStatus(state.error || 'Xử lý thất bại. Bạn có thể bấm Gửi ảnh để thử lại.', 'danger');
+        else showStatus(`Phiên hiện có ${state.imageCount} trang đã upload. ${state.imageCount ? 'Bạn có thể thêm trang hoặc bấm Gửi ảnh.' : 'Đang chờ ảnh từ PC hoặc điện thoại.'}`);
+      } catch (error) { showStatus(error.message, 'danger'); }
+    }
+    async function createSession() {
+      try {
+        if (requestedSession) sessionToken = requestedSession;
+        else { const session = await api('/api/invoice-sessions', { method: 'POST' }); sessionToken = session.session_token; }
+        const qrResponse = await fetch(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/qr`);
+        if (qrResponse.status === 401) { location.href = '/login.html'; return; }
+        if (!qrResponse.ok) {
+          const payload = await qrResponse.json().catch(() => ({}));
+          throw new Error(payload.error || 'Không thể tạo mã QR.');
+        }
+        const qrBlob = await qrResponse.blob();
+        if (!qrBlob.type.startsWith('image/')) throw new Error('Dữ liệu mã QR không hợp lệ.');
+        const qr = document.querySelector('#qr');
+        qr.src = URL.createObjectURL(qrBlob);
+        qr.onload = () => URL.revokeObjectURL(qr.src);
+        qr.classList.remove('d-none');
+        const encodedUrl = qrResponse.headers.get('X-Upload-URL');
+        if (encodedUrl) document.querySelector('#mobile-url').textContent = decodeURIComponent(encodedUrl);
+        await refreshStatus(); pollTimer = setInterval(refreshStatus, 1500);
+      } catch (error) {
+        showStatus(error.message, 'danger');
+        document.querySelector('#mobile-url').textContent = `Lỗi QR: ${error.message}`;
+      }
+    }
+    input.addEventListener('change', () => { selectedFiles = Array.from(input.files); renderLocalPreviews(); });
+    document.querySelector('#choose-again').addEventListener('click', () => { input.value = ''; selectedFiles = []; renderLocalPreviews(); input.click(); });
+    uploadButton.addEventListener('click', async () => {
+      uploadButton.disabled = true;
+      try {
+        const form = new FormData(); selectedFiles.forEach((file) => form.append('invoiceImages', file));
+        const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images`, { method: 'POST', body: form });
+        selectedFiles = []; input.value = ''; renderLocalPreviews(); showStatus(`Đã upload thêm ${result.added} trang.`, 'success'); await refreshStatus();
+      } catch (error) { showStatus(error.message, 'danger'); uploadButton.disabled = false; }
+    });
+    processButton.addEventListener('click', async () => {
+      processButton.disabled = true;
+      try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/process`, { method: 'POST' }); showStatus('Gemini đang xử lý toàn bộ các trang…'); await refreshStatus(); }
+      catch (error) { showStatus(error.message, 'danger'); await refreshStatus(); }
+    });
+    createSession();
+  </script>
+  </body>
+</html>

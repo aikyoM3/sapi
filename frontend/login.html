@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Đăng nhập - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+  </head>
+  <body class="d-flex flex-column bg-light"><div class="page page-center"><div class="container container-tight py-4">
+    <div class="text-center mb-4"><span class="fs-1 fw-bold text-primary">SAPI</span></div>
+    <form id="login-form" class="card card-md" autocomplete="on"><div class="card-body">
+      <h2 class="h2 text-center mb-4">Đăng nhập</h2>
+      <div class="mb-3"><label class="form-label" for="username">Tên đăng nhập</label><input id="username" class="form-control" type="text" autocomplete="username" required /></div>
+      <div class="mb-2"><label class="form-label" for="password">Mật khẩu</label><input id="password" class="form-control" type="password" autocomplete="current-password" required /></div>
+      <div id="login-error" class="text-danger mt-3" role="alert"></div>
+      <div class="form-footer"><button id="submit-button" class="btn btn-primary w-100" type="submit">Đăng nhập</button></div>
+    </div></form>
+    <div class="text-center text-secondary mt-3">Chưa có tài khoản? <a href="/register.html">Đăng ký</a></div>
+  </div></div>
+  <script>
+    const form = document.querySelector('#login-form'); const errorBox = document.querySelector('#login-error'); const submitButton = document.querySelector('#submit-button');
+    fetch('/api/auth/me').then((response) => { if (response.ok) window.location.replace('/index.html'); });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault(); errorBox.textContent = ''; submitButton.disabled = true;
+      try {
+        const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: document.querySelector('#username').value, password: document.querySelector('#password').value }) });
+        const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || 'Không thể đăng nhập.');
+        window.location.replace('/index.html');
+      } catch (error) { errorBox.textContent = error.message; submitButton.disabled = false; }
+    });
+  </script>
+  </body>
+</html>

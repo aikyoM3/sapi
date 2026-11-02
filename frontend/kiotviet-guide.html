@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hướng dẫn kết nối KiotViet - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+    <style>
+      body { background: #f6f8fb; }
+      .guide-hero { background: linear-gradient(135deg, #206bc4, #4299e1); color: #fff; padding: 3.5rem 0; }
+      .guide-hero p { max-width: 46rem; }
+      .guide-container { max-width: 960px; }
+      .step-card { border: 0; box-shadow: 0 1px 3px rgba(24, 36, 51, .08); }
+      .step-number { display: inline-flex; flex: 0 0 2.75rem; width: 2.75rem; height: 2.75rem; align-items: center; justify-content: center; border-radius: 50%; background: #206bc4; color: #fff; font-size: 1.1rem; font-weight: 700; }
+      .security-box { padding: 1.25rem; border-left: 4px solid #206bc4; border-radius: .5rem; background: #e8f5ff; }
+      .image-placeholder { display: flex; min-height: 180px; margin-top: 1.25rem; align-items: center; justify-content: center; padding: 1rem; border: 1px dashed #b8c4d2; border-radius: .75rem; background: #f8fafc; color: #667085; text-align: center; }
+      .guide-list li { margin-bottom: .5rem; }
+      @media (max-width: 575.98px) { .guide-hero { padding: 2.5rem 0; } .card-body { padding: 1.25rem !important; } .step-number { flex-basis: 2.4rem; width: 2.4rem; height: 2.4rem; } }
+    </style>
+  </head>
+  <body>
+    <header class="navbar navbar-light bg-white border-bottom">
+      <div class="container-xl">
+        <a class="navbar-brand fw-bold fs-2 text-primary" href="/index.html">SAPI</a>
+        <a class="btn btn-outline-primary" href="/index.html">Quay lại SAPI</a>
+      </div>
+    </header>
+
+    <section class="guide-hero">
+      <div class="container-xl guide-container">
+        <span class="badge bg-white text-primary mb-3">SAPI Integration</span>
+        <h1 class="display-6 fw-bold mb-3">Hướng dẫn kết nối KiotViet</h1>
+        <p class="fs-3 mb-0 opacity-75">Kết nối gian hàng KiotViet với SAPI để đồng bộ sản phẩm, nhóm hàng, nhà cung cấp và hỗ trợ quá trình nhập hàng.</p>
+      </div>
+    </section>
+
+    <main class="container-xl guide-container py-5">
+      <section class="card step-card mb-4">
+        <div class="card-body p-4">
+          <h2 class="h2">Kết nối API KiotViet là gì?</h2>
+          <p>API KiotViet cho phép các hệ thống bên ngoài kết nối và trao đổi dữ liệu với gian hàng. SAPI sử dụng kết nối này để đồng bộ sản phẩm, nhóm hàng, nhà cung cấp và phục vụ quá trình nhập hàng.</p>
+          <div class="security-box">
+            <strong>Lưu ý bảo mật</strong>
+            <p class="mb-0 mt-2">Thông tin API chỉ nên cung cấp cho hệ thống đáng tin cậy. Không chia sẻ Client ID hoặc Mã bảo mật công khai.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card step-card mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">1</span><h2 class="h2 mb-0">Truy cập phần Thiết lập cửa hàng</h2></div>
+          <p>Đăng nhập vào KiotViet bằng tài khoản quản trị. Từ màn hình quản lý, chọn:</p>
+          <p class="fw-bold mb-0">Thiết lập → Cửa hàng</p>
+          <div class="image-placeholder">Vị trí ảnh minh họa bước 1: Thiết lập cửa hàng KiotViet</div>
+        </div>
+      </section>
+
+      <section class="card step-card mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">2</span><h2 class="h2 mb-0">Mở mục Kết nối API</h2></div>
+          <p>Trong menu bên trái, chọn:</p>
+          <p class="fw-bold mb-0">Kết nối API → Chỉnh sửa</p>
+          <div class="image-placeholder">Vị trí ảnh minh họa bước 2: Màn hình Kết nối API KiotViet</div>
+        </div>
+      </section>
+
+      <section class="card step-card mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">3</span><h2 class="h2 mb-0">Tạo thông tin API</h2></div>
+          <p>KiotViet có thể yêu cầu xác thực trước khi tạo thông tin kết nối. Hãy thực hiện theo hướng dẫn trên màn hình:</p>
+          <ul class="guide-list">
+            <li>Nhận và nhập mã xác thực.</li>
+            <li>Xác nhận điều khoản sử dụng API.</li>
+            <li>Tạo Mã bảo mật.</li>
+            <li>Lưu thông tin kết nối.</li>
+          </ul>
+          <div class="image-placeholder">Vị trí ảnh minh họa bước 3: Tạo Mã bảo mật KiotViet</div>
+        </div>
+      </section>
+
+      <section class="card step-card mb-4">
+        <div class="card-body p-4">
+          <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">4</span><h2 class="h2 mb-0">Lấy Client ID và Mã bảo mật</h2></div>
+          <p>Sau khi hoàn tất thiết lập, KiotViet cung cấp hai thông tin dùng để xác thực:</p>
+          <div class="row g-3">
+            <div class="col-md-6"><div class="card bg-light h-100"><div class="card-body"><h3 class="h3">Client ID</h3><p class="mb-0">Định danh ứng dụng kết nối.</p></div></div></div>
+            <div class="col-md-6"><div class="card bg-light h-100"><div class="card-body"><h3 class="h3">Mã bảo mật</h3><p class="mb-0">Thông tin bí mật được sử dụng để xác thực kết nối.</p></div></div></div>
+          </div>
+          <div class="image-placeholder">Vị trí ảnh minh họa bước 4: Client ID và Mã bảo mật KiotViet</div>
+        </div>
+      </section>
+
+      <section class="card border-primary">
+        <div class="card-body p-4">
+          <h2 class="h2">Kết nối với SAPI</h2>
+          <p>Sau khi có thông tin API:</p>
+          <ol class="guide-list">
+            <li>Quay lại ứng dụng SAPI.</li>
+            <li>Chọn <strong>Sửa thông tin</strong>, sau đó tìm phần <strong>KiotViet</strong>.</li>
+            <li>Nhập Client ID và Mã bảo mật.</li>
+            <li>Nhập tên gian hàng, ví dụ <code>abc</code> hoặc <code>abc.kiotviet.vn</code>.</li>
+            <li>Nhấn <strong>Liên kết</strong>.</li>
+          </ol>
+          <p class="text-secondary mb-0">Sau khi xác thực thành công, SAPI sẽ hỏi bạn có muốn đồng bộ dữ liệu KiotViet ngay hay không.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="py-4 text-center text-secondary">© SAPI — Smart Invoice Processing System</footer>
+  </body>
+</html>
