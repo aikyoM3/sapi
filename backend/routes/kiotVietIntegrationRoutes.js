@@ -1,6 +1,6 @@
 const express = require('express');
 const { currentUserId } = require('../middleware/auth');
-const { connectKiotViet, connectionStatus, syncConnection, disconnectKiotViet, checkConnection } = require('../services/kiotVietConnectionService');
+const { connectKiotViet, connectionStatus, syncConnection, disconnectKiotViet, checkConnection, updateSyncSchedule } = require('../services/kiotVietConnectionService');
 const { KiotVietError } = require('../kiotviet');
 
 const router = express.Router();
@@ -33,6 +33,11 @@ module.exports = function kiotVietIntegrationRoutes(pool) {
       if (error.code === 'AUTH') error.message = 'Kết nối KiotViet hiện không còn hợp lệ.\n\nHãy kiểm tra lại thông tin kết nối trong mục Sửa thông tin.';
       sendKiotError(res, error);
     }
+  });
+
+  router.put('/schedule', async (req, res, next) => {
+    try { res.json(await updateSyncSchedule(pool, currentUserId(req), req.body || {})); }
+    catch (error) { res.status(error.statusCode || 500).json({ error: error.message || 'Không thể cập nhật lịch đồng bộ.' }); }
   });
 
   router.post('/disconnect', async (req, res, next) => {

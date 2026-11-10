@@ -16,6 +16,7 @@
           <input id="image-input" class="form-control" type="file" accept="image/jpeg,image/png,image/webp" multiple />
           <div class="btn-list mt-3"><button id="upload" class="btn btn-outline-primary" disabled>Upload</button><button id="choose-again" class="btn btn-outline-secondary">Upload lại / chọn lại</button><button id="process" class="btn btn-primary" disabled>Gửi ảnh</button></div>
           <div id="local-previews" class="preview-grid mt-4"></div>
+          <div id="uploaded-pages" class="preview-grid mt-4"></div>
           <div id="status" class="alert alert-info mt-4 mb-0" role="status">Đang tạo phiên hóa đơn…</div>
         </div></div></div>
         <div class="col-lg-4"><div class="card"><div class="card-header"><h3 class="card-title">Chụp bằng điện thoại</h3></div><div class="card-body text-center">
@@ -35,6 +36,7 @@
     const previewGrid = document.querySelector('#local-previews');
     let sessionToken = null;
     let selectedFiles = [];
+    let uploadedImages = [];
     let pollTimer = null;
     const requestedSession = new URLSearchParams(location.search).get('session');
 
@@ -56,10 +58,40 @@
       });
       uploadButton.disabled = !sessionToken || !selectedFiles.length;
     }
+    function canManageImages() { return ['WAITING_IMAGES', 'UPLOADING', 'READY_TO_PROCESS', 'FAILED'].includes(document.body.dataset.sessionStatus); }
+    function renderUploadedImages() {
+      const grid = document.querySelector('#uploaded-pages'); grid.replaceChildren();
+      uploadedImages.forEach((image, index) => {
+        const card = document.createElement('div'); card.className = 'card preview-card';
+        const preview = document.createElement('img'); preview.src = image.url; preview.alt = `Trang đã upload ${index + 1}`;
+        const body = document.createElement('div'); body.className = 'card-body p-2';
+        const label = document.createElement('div'); label.textContent = `Trang ${index + 1} đã upload`;
+        const actions = document.createElement('div'); actions.className = 'btn-list mt-2';
+        [['↑', index > 0, () => moveImage(index, -1)], ['↓', index < uploadedImages.length - 1, () => moveImage(index, 1)], ['Xóa', true, () => deleteImage(image.imageId)]].forEach(([name, enabled, action]) => {
+          const button = document.createElement('button'); button.type = 'button'; button.className = name === 'Xóa' ? 'btn btn-sm btn-outline-danger' : 'btn btn-sm btn-outline-secondary'; button.textContent = name; button.disabled = !enabled || !canManageImages(); button.addEventListener('click', action); actions.append(button);
+        });
+        body.append(label, actions); card.append(preview, body); grid.append(card);
+      });
+    }
+    async function loadUploadedImages() {
+      if (!sessionToken) return;
+      const detail = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}`);
+      uploadedImages = detail.images || []; renderUploadedImages();
+    }
+    async function deleteImage(imageId) {
+      try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images/${imageId}`, { method: 'DELETE' }); await loadUploadedImages(); await refreshStatus(); }
+      catch (error) { showStatus(error.message, 'danger'); }
+    }
+    async function moveImage(index, offset) {
+      const reordered = [...uploadedImages]; const target = index + offset; [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+      try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images/order`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageIds: reordered.map((image) => image.imageId) }) }); uploadedImages = reordered; renderUploadedImages(); }
+      catch (error) { showStatus(error.message, 'danger'); }
+    }
     async function refreshStatus() {
       if (!sessionToken) return;
       try {
         const state = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/status`);
+        document.body.dataset.sessionStatus = state.status; renderUploadedImages();
         processButton.disabled = state.imageCount < 1 || state.status === 'PROCESSING';
         if (state.status === 'PROCESSING') showStatus(`Gemini đang xử lý ${state.imageCount} trang…`);
         else if (state.status === 'READY_FOR_REVIEW') { clearInterval(pollTimer); location.href = `/invoice-correction.html?session=${encodeURIComponent(sessionToken)}`; }
@@ -85,7 +117,7 @@
         qr.classList.remove('d-none');
         const encodedUrl = qrResponse.headers.get('X-Upload-URL');
         if (encodedUrl) document.querySelector('#mobile-url').textContent = decodeURIComponent(encodedUrl);
-        await refreshStatus(); pollTimer = setInterval(refreshStatus, 1500);
+        await loadUploadedImages(); await refreshStatus(); pollTimer = setInterval(refreshStatus, 1500);
       } catch (error) {
         showStatus(error.message, 'danger');
         document.querySelector('#mobile-url').textContent = `Lỗi QR: ${error.message}`;
@@ -98,7 +130,7 @@
       try {
         const form = new FormData(); selectedFiles.forEach((file) => form.append('invoiceImages', file));
         const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images`, { method: 'POST', body: form });
-        selectedFiles = []; input.value = ''; renderLocalPreviews(); showStatus(`Đã upload thêm ${result.added} trang.`, 'success'); await refreshStatus();
+        selectedFiles = []; input.value = ''; renderLocalPreviews(); showStatus(`Đã upload thêm ${result.added} trang.`, 'success'); await loadUploadedImages(); await refreshStatus();
       } catch (error) { showStatus(error.message, 'danger'); uploadButton.disabled = false; }
     });
     processButton.addEventListener('click', async () => {

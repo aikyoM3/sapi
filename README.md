@@ -77,6 +77,21 @@ Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, st
 6. **Sửa hóa đơn** calculates each line, subtotal, discount, and payment total in the browser; the backend validates and recalculates them again.
 7. Only **Xác nhận hóa đơn** creates `purchaseinvoice` and `purchaseinvoiceitem`, updates mapping where applicable, marks the session confirmed, and deletes temporary image files.
 
+### Mapping and KiotViet source of truth
+
+- Gemini only reads the text printed on the invoice. It never chooses a KiotViet product or supplier.
+- SAPI only auto-fills a product/supplier when an exact mapping confirmed by the user exists for that supplier and printed name.
+- If no mapping exists, choose a product and supplier from the synchronized KiotViet catalog. On confirmation, SAPI saves the exact mapping for later invoices.
+- Product and supplier master data are read-only in SAPI. Create or correct them in KiotViet, then use **Đồng bộ ngay**.
+- Before sending images to Gemini, the upload page can remove a saved page and move pages up/down. These operations are locked once Gemini processing starts.
+
+### Invoice search, correction, and retry
+
+- The Nhập hàng list supports search by invoice number/supplier, status, and invoice-date range.
+- `PENDING_SYNC` invoices can be corrected locally and synchronized again.
+- Editing a `SYNCED` invoice sends an update to its existing KiotViet purchase order; it does not create a replacement order.
+- The automatic KiotViet sync option is disabled by default. Enable it under **Sửa thông tin → KiotViet**, then choose a 15–1,440 minute interval. The Node process must remain running.
+
 ## Troubleshooting (upload / Gemini errors)
 
 The red text on **Tải ảnh hóa đơn** is the next action. Also look at the **backend terminal** for `Gemini invoice extraction failed:` (the API key is never printed).

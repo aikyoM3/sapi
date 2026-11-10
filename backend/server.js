@@ -20,6 +20,7 @@ const createKiotVietIntegrationRoutes = require('./routes/kiotVietIntegrationRou
 const createGeminiIntegrationRoutes = require('./routes/geminiIntegrationRoutes');
 const { loadGeminiApiKey } = require('./services/geminiConnectionService');
 const { loadConnectionConfig, syncConnection } = require('./services/kiotVietConnectionService');
+const { startKiotVietSyncScheduler } = require('./services/kiotVietSyncScheduler');
 const { getMobileBaseUrl } = require('./services/lanAddress');
 const createKiotVietMockRoutes = require('./mock/kiotVietMockRoutes');
 
@@ -148,6 +149,7 @@ app.use((error, _req, res, _next) => {
 
 async function start() {
   await runMigrations(pool);
+  startKiotVietSyncScheduler(pool);
   app.listen(port, '0.0.0.0', () => {
     console.log(`SAPI is running on port ${port}`);
     try { console.log(`Mobile base URL: ${getMobileBaseUrl({ port })}`); }

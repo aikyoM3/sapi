@@ -68,7 +68,8 @@ async function checkConnection(pool, userId) {
 
 async function connectionStatus(pool, userId) {
   const { rows } = await pool.query(`
-    SELECT retailer_code, retailer_name, status, connected_at, last_verified_at, last_sync_at
+    SELECT retailer_code, retailer_name, status, connected_at, last_verified_at, last_sync_at,
+           sync_enabled, sync_interval_minutes, next_sync_at, last_sync_error
     FROM kiotviet_connections WHERE user_id=$1
   `, [userId]);
   const connection = rows[0];
@@ -80,8 +81,33 @@ async function connectionStatus(pool, userId) {
     connectedAt: connection?.connected_at || null,
     lastVerifiedAt: connection?.last_verified_at || null,
     lastSyncAt: connection?.last_sync_at || null,
+    automaticSync: {
+      enabled: Boolean(connection?.sync_enabled),
+      intervalMinutes: connection?.sync_interval_minutes || 60,
+      nextSyncAt: connection?.next_sync_at || null,
+      lastError: connection?.last_sync_error || null,
+    },
     devCredentialsAvailable: process.env.KIOTVIET_DEV_USE_ENV_CREDENTIALS === 'true',
   };
+}
+
+async function updateSyncSchedule(pool, userId, body) {
+  const enabled = body?.enabled === true;
+  const intervalMinutes = Number(body?.intervalMinutes || 60);
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes < 15 || intervalMinutes > 1440) {
+    throw Object.assign(new Error('Chu kỳ đồng bộ phải từ 15 đến 1.440 phút.'), { statusCode: 400 });
+  }
+  const result = await pool.query(`
+    UPDATE kiotviet_connections
+    SET sync_enabled=$1, sync_interval_minutes=$2,
+        next_sync_at=CASE WHEN $1 THEN NOW() + ($2 || ' minutes')::interval ELSE NULL END,
+        last_sync_error=NULL, updated_at=NOW()
+    WHERE user_id=$3
+    RETURNING sync_enabled, sync_interval_minutes, next_sync_at, last_sync_error
+  `, [enabled, intervalMinutes, userId]);
+  if (!result.rowCount) throw Object.assign(new Error('Chưa có kết nối KiotViet để thiết lập đồng bộ tự động.'), { statusCode: 409 });
+  const schedule = result.rows[0];
+  return { enabled: schedule.sync_enabled, intervalMinutes: schedule.sync_interval_minutes, nextSyncAt: schedule.next_sync_at, lastError: schedule.last_sync_error };
 }
 
 async function syncConnection(pool, userId, lastModifiedFrom) {
@@ -106,4 +132,4 @@ async function disconnectKiotViet(pool, userId) {
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
-module.exports = { normalizeRetailer, connectKiotViet, loadConnectionConfig, connectionStatus, syncConnection, disconnectKiotViet, checkConnection };
+module.exports = { normalizeRetailer, connectKiotViet, loadConnectionConfig, connectionStatus, syncConnection, disconnectKiotViet, checkConnection, updateSyncSchedule };

@@ -125,7 +125,7 @@ module.exports = function invoiceSessionRoutes(pool) {
       const session = await ownedSession(pool, currentUserId(req), req.params.token);
       if (!session) return res.status(404).json({ error: 'Không tìm thấy phiên hóa đơn.' });
       const { rows } = await pool.query('SELECT invoice_session_image_id, page_number FROM invoicesessionimage WHERE invoice_session_id = $1 ORDER BY page_number', [session.invoice_session_id]);
-      res.json({ status: session.status, extraction: session.ocr_result, error: session.error_message, images: rows.map((image) => ({ pageNumber: image.page_number, url: `/api/invoice-sessions/${session.session_token}/images/${image.invoice_session_image_id}` })) });
+      res.json({ status: session.status, extraction: session.ocr_result, error: session.error_message, images: rows.map((image) => ({ imageId: image.invoice_session_image_id, pageNumber: image.page_number, url: `/api/invoice-sessions/${session.session_token}/images/${image.invoice_session_image_id}` })) });
     } catch (error) { next(error); }
   });
 
@@ -158,6 +158,45 @@ module.exports = function invoiceSessionRoutes(pool) {
       if (!rows[0]) return res.status(404).json({ error: 'Không tìm thấy ảnh.' });
       res.type(rows[0].mime_type).sendFile(rows[0].image_path);
     } catch (error) { next(error); }
+  });
+
+  router.delete('/api/invoice-sessions/:token/images/:imageId', requireAuth, async (req, res, next) => {
+    const client = await pool.connect();
+    let imagePath = null;
+    try {
+      await client.query('BEGIN');
+      const sessionResult = await client.query('SELECT * FROM invoicesession WHERE session_token=$1 AND user_id=$2 FOR UPDATE', [req.params.token, currentUserId(req)]);
+      const session = sessionResult.rows[0];
+      if (!session) throw Object.assign(new Error('Không tìm thấy phiên hóa đơn.'), { statusCode: 404 });
+      if (!['WAITING_IMAGES', 'UPLOADING', 'READY_TO_PROCESS', 'FAILED'].includes(session.status)) throw Object.assign(new Error('Chỉ có thể chỉnh ảnh trước khi gửi Gemini.'), { statusCode: 409 });
+      const imageResult = await client.query('DELETE FROM invoicesessionimage WHERE invoice_session_id=$1 AND invoice_session_image_id=$2 RETURNING image_path', [session.invoice_session_id, req.params.imageId]);
+      if (!imageResult.rowCount) throw Object.assign(new Error('Không tìm thấy ảnh.'), { statusCode: 404 });
+      imagePath = imageResult.rows[0].image_path;
+      const count = await client.query('SELECT COUNT(*)::int AS count FROM invoicesessionimage WHERE invoice_session_id=$1', [session.invoice_session_id]);
+      await client.query("UPDATE invoicesession SET status=$1, updated_at=NOW() WHERE invoice_session_id=$2", [count.rows[0].count ? 'READY_TO_PROCESS' : 'WAITING_IMAGES', session.invoice_session_id]);
+      await client.query('COMMIT');
+      await removeTemporaryImages([imagePath]);
+      res.status(204).end();
+    } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
+  });
+
+  router.put('/api/invoice-sessions/:token/images/order', requireAuth, async (req, res, next) => {
+    const client = await pool.connect();
+    try {
+      const imageIds = Array.isArray(req.body?.imageIds) ? req.body.imageIds.map(Number) : [];
+      await client.query('BEGIN');
+      const sessionResult = await client.query('SELECT * FROM invoicesession WHERE session_token=$1 AND user_id=$2 FOR UPDATE', [req.params.token, currentUserId(req)]);
+      const session = sessionResult.rows[0];
+      if (!session) throw Object.assign(new Error('Không tìm thấy phiên hóa đơn.'), { statusCode: 404 });
+      if (!['WAITING_IMAGES', 'UPLOADING', 'READY_TO_PROCESS', 'FAILED'].includes(session.status)) throw Object.assign(new Error('Chỉ có thể sắp xếp ảnh trước khi gửi Gemini.'), { statusCode: 409 });
+      const existing = await client.query('SELECT invoice_session_image_id FROM invoicesessionimage WHERE invoice_session_id=$1 ORDER BY page_number', [session.invoice_session_id]);
+      const existingIds = existing.rows.map((row) => row.invoice_session_image_id);
+      if (imageIds.length !== existingIds.length || new Set(imageIds).size !== imageIds.length || imageIds.some((id) => !existingIds.includes(id))) throw Object.assign(new Error('Danh sách thứ tự ảnh không hợp lệ.'), { statusCode: 400 });
+      // Avoid the unique (session, page_number) constraint while swapping rows.
+      await client.query('UPDATE invoicesessionimage SET page_number=page_number+1000 WHERE invoice_session_id=$1', [session.invoice_session_id]);
+      for (let index = 0; index < imageIds.length; index += 1) await client.query('UPDATE invoicesessionimage SET page_number=$1 WHERE invoice_session_id=$2 AND invoice_session_image_id=$3', [index + 1, session.invoice_session_id, imageIds[index]]);
+      await client.query('COMMIT'); res.json({ updated: true });
+    } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
   });
 
   router.post('/api/invoice-sessions/:token/images', requireAuth, upload.array('invoiceImages', 12), async (req, res, next) => {
@@ -235,26 +274,11 @@ module.exports = function invoiceSessionRoutes(pool) {
         throw Object.assign(new Error('Có hàng hóa chưa có mã KiotViet nên chưa thể tạo phiếu nhập.'), { statusCode: 400 });
       }
 
-      let supplierId = Number(req.body.supplierId);
-      let supplierRecord;
-      if (Number.isInteger(supplierId) && supplierId > 0) {
-        const supplier = await client.query('SELECT supplier_id, supplier_name, phone_number, address FROM supplier WHERE supplier_id = $1 AND user_id = $2', [supplierId, currentUserId(req)]);
-        if (!supplier.rowCount) throw Object.assign(new Error('Nhà cung cấp không thuộc account hiện tại.'), { statusCode: 403 });
-        supplierRecord = supplier.rows[0];
-      } else {
-        const supplierName = safeText(req.body.supplierName);
-        if (!supplierName) throw Object.assign(new Error('Hãy nhập hoặc chọn nhà cung cấp.'), { statusCode: 400 });
-        const existing = await client.query('SELECT supplier_id FROM supplier WHERE user_id = $1 AND LOWER(supplier_name) = LOWER($2) LIMIT 1', [currentUserId(req), supplierName]);
-        if (existing.rowCount) {
-          supplierId = existing.rows[0].supplier_id;
-          supplierRecord = (await client.query('SELECT supplier_id, supplier_name, phone_number, address FROM supplier WHERE supplier_id = $1', [supplierId])).rows[0];
-        }
-        else {
-          const inserted = await client.query('INSERT INTO supplier (user_id, supplier_name, phone_number, address) VALUES ($1, $2, $3, $4) RETURNING supplier_id, supplier_name, phone_number, address', [currentUserId(req), supplierName, safeText(req.body.supplierPhone) || null, safeText(req.body.supplierAddress, 1000) || null]);
-          supplierId = inserted.rows[0].supplier_id;
-          supplierRecord = inserted.rows[0];
-        }
-      }
+      const supplierId = Number(req.body.supplierId);
+      if (!Number.isInteger(supplierId) || supplierId <= 0) throw Object.assign(new Error('Hãy chọn nhà cung cấp từ danh mục KiotViet đã đồng bộ.'), { statusCode: 400 });
+      const supplier = await client.query('SELECT supplier_id, supplier_name, phone_number, address FROM supplier WHERE supplier_id = $1 AND user_id = $2', [supplierId, currentUserId(req)]);
+      if (!supplier.rowCount) throw Object.assign(new Error('Nhà cung cấp không thuộc account hiện tại.'), { statusCode: 403 });
+      const supplierRecord = supplier.rows[0];
 
       const subtotal = normalized.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       if (discount > subtotal) throw Object.assign(new Error('Chiết khấu không được lớn hơn tổng tiền hàng.'), { statusCode: 400 });
@@ -305,6 +329,11 @@ module.exports = function invoiceSessionRoutes(pool) {
           if (mapping.rowCount) await client.query('UPDATE productmapping SET local_product_id = $1, local_unit = $2 WHERE mapping_id = $3', [item.productId, item.unit, mapping.rows[0].mapping_id]);
           else await client.query('INSERT INTO productmapping (supplier_id, local_product_id, provider_product_name, local_unit) VALUES ($1, $2, $3, $4)', [supplierId, item.productId, item.externalName, item.unit]);
         }
+      }
+      const externalSupplierName = safeText(session.ocr_result?.gemini?.supplier?.name);
+      if (externalSupplierName) {
+        const supplierMapping = await client.query('SELECT supplier_mapping_id FROM suppliermapping WHERE local_supplier_id=$1 AND LOWER(provider_supplier_name)=LOWER($2) LIMIT 1', [supplierId, externalSupplierName]);
+        if (!supplierMapping.rowCount) await client.query('INSERT INTO suppliermapping(local_supplier_id,provider_supplier_name) VALUES($1,$2)', [supplierId, externalSupplierName]);
       }
       const imageResult = await client.query('SELECT image_path FROM invoicesessionimage WHERE invoice_session_id = $1', [session.invoice_session_id]);
       imagePaths = imageResult.rows.map((row) => row.image_path);

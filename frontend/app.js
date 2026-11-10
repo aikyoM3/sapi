@@ -17,7 +17,6 @@ const pageConfigs = {
       ['product_name', 'Tên hàng'],
       ['primary_unit', 'Đơn vị chính'],
       ['quantity', 'Số lượng', formatAmount],
-      ['actions', 'Thao tác', (_value, row) => editAction('products', row.product_id), true],
     ],
   },
   suppliers: {
@@ -26,7 +25,6 @@ const pageConfigs = {
       ['supplier_name', 'Tên nhà cung cấp'],
       ['phone_number', 'Số điện thoại'],
       ['address', 'Địa chỉ'],
-      ['actions', 'Thao tác', (_value, row) => editAction('suppliers', row.supplier_id), true],
     ],
   },
   mappings: {
@@ -41,14 +39,21 @@ const pageConfigs = {
       ['actions', 'Thao tác', (_value, row) => editAction('mappings', row.mapping_id), true],
     ],
   },
+  supplierMappings: {
+    endpoint: '/api/supplier-mappings',
+    columns: [
+      ['local_supplier_name', 'Nhà cung cấp trong KiotViet'],
+      ['provider_supplier_name', 'Tên nhà cung cấp trên hóa đơn'],
+      ['actions', 'Thao tác', (_value, row) => editAction('supplierMappings', row.supplier_mapping_id), true],
+    ],
+  },
 };
 
 let loadedTableName = null;
 let loadedTableRows = [];
 const editConfigs = {
-  products: { title: 'Chỉnh sửa hàng hóa', id: 'product_id', endpoint: '/api/products', fields: [['productCode','product_code','Mã hàng'],['productName','product_name','Tên hàng'],['primaryUnit','primary_unit','Đơn vị chính'],['quantity','quantity','Số lượng','number']] },
-  suppliers: { title: 'Chỉnh sửa nhà cung cấp', id: 'supplier_id', endpoint: '/api/suppliers', fields: [['supplierName','supplier_name','Tên nhà cung cấp'],['phoneNumber','phone_number','Số điện thoại'],['address','address','Địa chỉ']] },
   mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductCode','provider_product_code','Mã hàng nhà cung cấp'],['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ']] },
+  supplierMappings: { title: 'Chỉnh sửa đối chiếu nhà cung cấp', id: 'supplier_mapping_id', endpoint: '/api/supplier-mappings', fields: [['providerSupplierName','provider_supplier_name','Tên nhà cung cấp trên hóa đơn']] },
 };
 
 function formatDate(value) {
@@ -84,8 +89,8 @@ function formatInvoiceActions(_value, row) {
   if (row.status === 'INCOMPLETE') {
     return `<div class="btn-list flex-nowrap"><a class="btn btn-sm btn-outline-primary" href="/invoice-correction.html?session=${encodeURIComponent(row.session_token)}">Tiếp tục</a><button class="btn btn-sm btn-outline-danger" data-action="cancel-session" data-token="${encodeURIComponent(row.session_token)}">Hủy</button></div>`;
   }
-  if (row.status === 'PENDING_SYNC') return `<div class="btn-list flex-nowrap"><button class="btn btn-sm btn-primary" data-action="sync-invoice" data-id="${row.invoice_id}">Đồng bộ</button><a class="btn btn-sm btn-outline-primary" href="/invoice-detail.html?id=${row.invoice_id}">Xem</a><button class="btn btn-sm btn-outline-danger" data-action="cancel-invoice" data-id="${row.invoice_id}">Hủy</button></div>`;
-  return `<a class="btn btn-sm btn-outline-primary" href="/invoice-detail.html?id=${row.invoice_id}">Xem</a>`;
+  if (row.status === 'PENDING_SYNC') return `<div class="btn-list flex-nowrap"><button class="btn btn-sm btn-primary" data-action="sync-invoice" data-id="${row.invoice_id}">Đồng bộ</button><a class="btn btn-sm btn-outline-primary" href="/invoice-detail.html?id=${row.invoice_id}">Xem</a><a class="btn btn-sm btn-outline-secondary" href="/invoice-edit.html?id=${row.invoice_id}">Sửa</a><button class="btn btn-sm btn-outline-danger" data-action="cancel-invoice" data-id="${row.invoice_id}">Hủy</button></div>`;
+  return `<div class="btn-list flex-nowrap"><a class="btn btn-sm btn-outline-primary" href="/invoice-detail.html?id=${row.invoice_id}">Xem</a><a class="btn btn-sm btn-outline-secondary" href="/invoice-edit.html?id=${row.invoice_id}">Sửa</a></div>`;
 }
 
 function editAction(type, id) { return `<button class="btn btn-sm btn-outline-primary" data-action="edit-record" data-type="${type}" data-id="${id}">Chỉnh sửa</button>`; }
@@ -96,7 +101,9 @@ async function loadTable(pageName) {
   if (!config || !target) return;
 
   try {
-    const response = await fetch(config.endpoint);
+    const filters = document.querySelector('#invoice-filters');
+    const query = pageName === 'invoices' && filters ? new URLSearchParams(new FormData(filters)).toString() : '';
+    const response = await fetch(`${config.endpoint}${query ? `?${query}` : ''}`);
     if (response.status === 401) return window.location.replace('/login.html');
     if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
     const rows = await response.json();
@@ -109,8 +116,12 @@ async function loadTable(pageName) {
       }).join('')}</tr>`).join('')
       : `<tr><td colspan="${config.columns.length}" class="text-center text-secondary">Chưa có dữ liệu.</td></tr>`;
 
+    const activeFilters = new URLSearchParams(query || location.search);
+    const selectedStatus = activeFilters.get('status') || '';
+    const invoiceFilters = pageName === 'invoices' ? `<form id="invoice-filters" class="card card-body mb-3"><div class="row g-2"><div class="col-md-4"><input class="form-control" name="q" value="${escapeHtml(activeFilters.get('q') || '')}" placeholder="Tìm số hóa đơn hoặc nhà cung cấp"></div><div class="col-md-2"><select class="form-select" name="status"><option value="">Tất cả trạng thái</option><option value="INCOMPLETE" ${selectedStatus==='INCOMPLETE'?'selected':''}>Chưa hoàn thành</option><option value="PENDING_SYNC" ${selectedStatus==='PENDING_SYNC'?'selected':''}>Chưa đồng bộ</option><option value="SYNCED" ${selectedStatus==='SYNCED'?'selected':''}>Đã hoàn thành</option></select></div><div class="col-md-2"><input class="form-control" name="dateFrom" type="date" value="${escapeHtml(activeFilters.get('dateFrom') || '')}" aria-label="Từ ngày"></div><div class="col-md-2"><input class="form-control" name="dateTo" type="date" value="${escapeHtml(activeFilters.get('dateTo') || '')}" aria-label="Đến ngày"></div><div class="col-md-2"><button class="btn btn-primary w-100">Lọc</button></div></div></form>` : '';
     target.innerHTML = `
       <div class="container-xl">
+        ${invoiceFilters}
         <div id="table-feedback" class="mb-2" role="status"></div>
         <div class="card">
           <div class="table-responsive">
@@ -121,6 +132,7 @@ async function loadTable(pageName) {
           </div>
         </div>
       </div>`;
+    document.querySelector('#invoice-filters')?.addEventListener('submit', (event) => { event.preventDefault(); loadTable('invoices'); });
   } catch (error) {
     console.error(error);
     target.innerHTML = `
@@ -194,7 +206,8 @@ async function initializeSharedNavigation() {
   <div id="connections-modal-backdrop" class="modal-backdrop fade show d-none"></div><div id="connections-modal" class="modal d-none" style="display:none" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h3 class="modal-title">Sửa thông tin</h3><button class="btn-close" data-close-modal="connections-modal"></button></div><div class="modal-body">
     <div class="d-flex justify-content-between"><h3>1. Thông tin cửa hàng</h3><button id="store-edit" class="btn btn-sm">Sửa</button></div><p class="text-secondary">Thông tin này giúp SAPI phân biệt người mua với nhà cung cấp khi đọc hóa đơn.</p><dl id="store-view" class="row mb-0"></dl><div id="store-form"><div class="row"><div class="col-md-6 mb-3"><label class="form-label">Tên cửa hàng</label><input id="store-name" class="form-control"></div><div class="col-md-6 mb-3"><label class="form-label">Mã số thuế</label><input id="store-tax-code" class="form-control"></div><div class="col-12 mb-3"><label class="form-label">Địa chỉ</label><input id="store-address" class="form-control"></div><div class="col-md-6 mb-3"><label class="form-label">Số điện thoại</label><input id="store-phone" class="form-control"></div><div class="col-md-6 mb-3"><label class="form-label">Email</label><input id="store-email" class="form-control" type="email"></div></div><div class="btn-list"><button id="store-cancel" class="btn btn-sm">Hủy</button><button id="store-save" class="btn btn-primary btn-sm">Lưu</button></div></div><div id="store-message" class="small mt-2" style="white-space:pre-line"></div><hr>
     <div class="d-flex justify-content-between"><h3>2. KiotViet</h3><button id="kiot-edit" class="btn btn-sm">Sửa</button></div><div id="kiot-view"><div id="edit-kiot-status" class="small mb-3"></div><div class="btn-list"><button id="kiot-check" class="btn btn-outline-primary btn-sm">Kiểm tra kết nối</button><button id="kiot-disconnect" class="btn btn-outline-danger btn-sm">Ngắt kết nối</button></div></div><div id="kiot-form"><div class="row"><div class="col-md-6 mb-3"><label class="form-label">Client ID</label><input id="kiot-client-id" class="form-control" autocomplete="off"></div><div class="col-md-6 mb-3"><label class="form-label">Mã bảo mật</label><input id="kiot-client-secret" class="form-control" type="password" autocomplete="new-password" placeholder="Nhập mã mới; mã đã lưu không được hiển thị"></div><div class="col-12 mb-3"><label class="form-label">Retailer/gian hàng</label><input id="kiot-retailer" class="form-control" placeholder="abc hoặc abc.kiotviet.vn"></div></div><label id="kiot-dev-wrap" class="form-check d-none"><input id="kiot-use-dev" class="form-check-input" type="checkbox"><span class="form-check-label">Sử dụng thông tin KiotViet từ môi trường development</span></label><a class="small d-block mt-2" href="/huong-dan-ket-noi-kiotviet" target="_blank" rel="noopener">Cách lấy thông tin API KiotViet ↗</a><div class="btn-list mt-3"><button id="kiot-cancel" class="btn btn-sm">Hủy</button><button id="kiot-connect" class="btn btn-primary btn-sm">Kết nối / Cập nhật</button></div></div><div id="kiot-message" class="small mt-2" style="white-space:pre-line"></div><hr>
-    <div class="d-flex justify-content-between"><h3>3. Gemini API</h3><button id="gemini-edit" class="btn btn-sm">Sửa</button></div><div id="gemini-view"><div id="gemini-status" class="small mb-2"></div></div><div id="gemini-form"><label class="form-label" for="gemini-api-key">Gemini API Key</label><input id="gemini-api-key" class="form-control" type="password" autocomplete="new-password" placeholder="Nhập key mới; key đã lưu không được hiển thị"><label id="gemini-dev-wrap" class="form-check mt-2 d-none"><input id="gemini-use-dev" class="form-check-input" type="checkbox"><span class="form-check-label">Dùng key development</span></label><a class="small d-block mt-2" href="/huong-dan-ket-noi-gemini" target="_blank" rel="noopener">Cách lấy Gemini API Key ↗</a><div class="btn-list mt-3"><button id="gemini-cancel" class="btn btn-sm">Hủy</button><button id="gemini-connect" class="btn btn-sm btn-primary">Kiểm tra và lưu API Key</button></div></div><div id="gemini-message" class="small mt-2" style="white-space:pre-line"></div>
+    <div id="sync-schedule" class="mt-3"><label class="form-check"><input id="sync-enabled" class="form-check-input" type="checkbox"><span class="form-check-label">Tự động đồng bộ KiotViet</span></label><div class="row g-2 align-items-end mt-1"><div class="col-sm-5"><label class="form-label">Chu kỳ (phút)</label><input id="sync-interval" class="form-control" type="number" min="15" max="1440" value="60"></div><div class="col-sm-4"><button id="sync-schedule-save" class="btn btn-outline-primary">Lưu lịch</button></div></div><div id="sync-schedule-status" class="small text-secondary mt-2"></div></div><hr>
+    <div class="d-flex justify-content-between"><h3>3. Gemini API</h3><button id="gemini-edit" class="btn btn-sm">Sửa</button></div><div id="gemini-view"><div id="gemini-status" class="small mb-2"></div></div><div id="gemini-form"><label class="form-label" for="gemini-api-key">Gemini API Key</label><input id="gemini-api-key" class="form-control" type="password" autocomplete="new-password" placeholder="Nhập key mới; key đã lưu không được hiển thị"><label id="gemini-dev-wrap" class="form-check mt-2 d-none"><input id="gemini-use-dev" class="gemini-api-key form-check-input" type="checkbox"><span class="form-check-label">Dùng key development</span></label><a class="small d-block mt-2" href="/huong-dan-ket-noi-gemini" target="_blank" rel="noopener">Cách lấy Gemini API Key ↗</a><div class="btn-list mt-3"><button id="gemini-cancel" class="btn btn-sm">Hủy</button><button id="gemini-connect" class="btn btn-sm btn-primary">Kiểm tra và lưu API Key</button></div></div><div id="gemini-message" class="small mt-2" style="white-space:pre-line"></div>
   </div><div class="modal-footer"><button class="btn" data-close-modal="connections-modal">Đóng</button></div></div></div></div>`);
 
   let connectionState = { kiot: {}, gemini: {} }; let currentProfile = {};
@@ -224,6 +237,11 @@ async function initializeSharedNavigation() {
     document.querySelector('#kiot-check').classList.toggle('d-none', !kiot.connected);
     document.querySelector('#kiot-disconnect').classList.toggle('d-none', !kiot.connected);
     document.querySelector('#kiot-dev-wrap').classList.toggle('d-none', !kiot.devCredentialsAvailable);
+    const schedule = kiot.automaticSync || {};
+    document.querySelector('#sync-enabled').checked = Boolean(schedule.enabled);
+    document.querySelector('#sync-interval').value = schedule.intervalMinutes || 60;
+    document.querySelector('#sync-schedule').classList.toggle('d-none', !kiot.connected);
+    document.querySelector('#sync-schedule-status').textContent = schedule.enabled ? `Lần chạy kế tiếp: ${formatConnectionDate(schedule.nextSyncAt)}${schedule.lastError ? ` · Lỗi gần nhất: ${schedule.lastError}` : ''}` : 'Đang tắt. Đồng bộ vẫn có thể thực hiện thủ công.';
     document.querySelector('#gemini-status').textContent = gemini.connected ? `● Đã cấu hình${gemini.source==='development'?' bằng API development':''}` : '● Chưa cấu hình';
     document.querySelector('#gemini-status').className = `small mb-2 text-${gemini.connected?'success':'secondary'}`;
     document.querySelector('#gemini-dev-wrap').classList.toggle('d-none', !gemini.devCredentialsAvailable);
@@ -266,6 +284,7 @@ async function initializeSharedNavigation() {
   });
   document.querySelector('#kiot-check').addEventListener('click', async () => { try{await jsonRequest('/api/integrations/kiotviet/check',{method:'POST'});showMessage('#kiot-message','✓ Kết nối KiotViet đang hoạt động.',true);await refreshConnections()}catch(error){showMessage('#kiot-message',error.message)} });
   document.querySelector('#kiot-disconnect').addEventListener('click', async () => { if(!confirm('Ngắt kết nối KiotViet?'))return;try{await jsonRequest('/api/integrations/kiotviet/disconnect',{method:'POST'});showMessage('#kiot-message','Đã ngắt kết nối KiotViet.',true);await refreshConnections()}catch(error){showMessage('#kiot-message',error.message)} });
+  document.querySelector('#sync-schedule-save').addEventListener('click', async () => { const button=document.querySelector('#sync-schedule-save'); button.disabled=true; try { await jsonRequest('/api/integrations/kiotviet/schedule',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:document.querySelector('#sync-enabled').checked,intervalMinutes:Number(document.querySelector('#sync-interval').value)})}); await refreshConnections(); } catch(error) { document.querySelector('#sync-schedule-status').textContent=error.message; } finally { button.disabled=false; } });
   document.querySelector('#gemini-use-dev').addEventListener('change', (event) => { document.querySelector('#gemini-api-key').disabled=event.target.checked; });
   document.querySelector('#gemini-edit').addEventListener('click',()=>setSectionMode('gemini',true,true));
   document.querySelector('#gemini-cancel').addEventListener('click',()=>{document.querySelector('#gemini-api-key').value='';setSectionMode('gemini',false,connectionState.gemini.connected)});

@@ -37,6 +37,16 @@ module.exports = function kiotVietMockRoutes() {
     purchaseOrders.push(order);
     res.status(201).json(order);
   });
+  router.put('/purchaseorders/:id', (req, res) => {
+    const order = purchaseOrders.find((item) => item.id === Number(req.params.id));
+    if (!order) return res.status(404).json({ error: 'purchase_order_not_found' });
+    const payload = req.body || {};
+    if (!Number.isFinite(Number(payload.branchId)) || !payload.supplier?.name || !Array.isArray(payload.purchaseOrderDetails) || !payload.purchaseOrderDetails.length) {
+      return res.status(400).json({ error: 'invalid_purchase_order', message: 'Payload phiếu nhập không hợp lệ.' });
+    }
+    Object.assign(order, payload, { modifiedDate: new Date().toISOString() });
+    res.json(order);
+  });
   router.get('/purchaseorders', (_req, res) => res.json(paged(purchaseOrders)));
   return router;
 };

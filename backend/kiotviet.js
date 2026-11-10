@@ -94,6 +94,19 @@ async function createClient(config) {
       if (!response.ok) throw new KiotVietError(result.message || result.error || `KiotViet từ chối phiếu nhập (HTTP ${response.status}).`, 'PURCHASE_ORDER', 400);
       return result;
     },
+    async put(apiPath, payload) {
+      let response;
+      try {
+        response = await fetch(`${endpoints.apiUrl}${apiPath}`, {
+          method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, Retailer: credentials.retailer, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload), signal: requestSignal(),
+        });
+      } catch (error) { throw connectionError(error); }
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok && ![400, 409, 422].includes(response.status)) throw apiStatusError(response.status);
+      if (!response.ok) throw new KiotVietError(result.message || result.error || `KiotViet từ chối cập nhật phiếu nhập (HTTP ${response.status}).`, 'PURCHASE_ORDER', 400);
+      return result;
+    },
   };
 }
 
@@ -122,6 +135,10 @@ function buildPurchaseOrderPayload({ branchId, supplier, purchaseDate, discount,
 
 async function createPurchaseOrder(config, payload) {
   return (await createClient(config)).post('/purchaseorders', payload);
+}
+
+async function updatePurchaseOrder(config, purchaseOrderId, payload) {
+  return (await createClient(config)).put(`/purchaseorders/${encodeURIComponent(purchaseOrderId)}`, payload);
 }
 
 async function verifyKiotViet(config) {
@@ -247,4 +264,4 @@ async function syncAll(pool, userId, config, lastModifiedFrom) {
   };
 }
 
-module.exports = { KiotVietError, getKiotVietEndpoints, verifyKiotViet, buildPurchaseOrderPayload, createPurchaseOrder, ensureKiotVietSchema, syncBranches, syncCategories, syncProducts, syncSuppliers, syncAll };
+module.exports = { KiotVietError, getKiotVietEndpoints, verifyKiotViet, buildPurchaseOrderPayload, createPurchaseOrder, updatePurchaseOrder, ensureKiotVietSchema, syncBranches, syncCategories, syncProducts, syncSuppliers, syncAll };
