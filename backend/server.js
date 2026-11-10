@@ -149,14 +149,14 @@ app.use((error, _req, res, _next) => {
 async function start() {
   await runMigrations(pool);
   app.listen(port, '0.0.0.0', () => {
-    console.log(`Project I is running on port ${port}`);
+    console.log(`SAPI is running on port ${port}`);
     try { console.log(`Mobile base URL: ${getMobileBaseUrl({ port })}`); }
     catch (error) { console.warn(error.message); }
   });
 }
 
 start().catch((error) => {
-  console.error('Unable to start Project I:', error);
+  console.error('Unable to start SAPI:', error);
   process.exitCode = 1;
 });
 

@@ -1,8 +1,8 @@
 {
-  "name": "project-i-backend",
+  "name": "sapi-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Express API and frontend server for Project I",
+  "description": "Express API and frontend server for SAPI",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

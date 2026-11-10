@@ -18,7 +18,7 @@ Terminal backend ghi nhận:
 
 ```text
 EPERM: operation not permitted, open
-D:\School-related\project-I\backend\temporary_invoice_images\<generated-name>.jpg
+D:\School-related\sapi\backend\temporary_invoice_images\<generated-name>.jpg
 ```
 
 Lỗi phát sinh trong `saveTemporaryImage()` tại `backend/services/imageFileService.js`, ở bước `fs.writeFile()`.
