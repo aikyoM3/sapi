@@ -39,7 +39,8 @@ async function lookupMappedProduct(pool, userId, supplierId, extractedName, extr
   if (!extractedName || !supplierId) return null;
   const { rows } = await pool.query(
     `
-    SELECT p.product_id, p.product_name, p.product_code, p.primary_unit, pm.provider_unit, pm.local_unit
+    SELECT p.product_id, p.product_name, p.product_code, p.primary_unit, pm.provider_unit, pm.local_unit,
+           pm.conversion_rate_to_local
     FROM productmapping pm
     JOIN product p ON p.product_id = pm.local_product_id
     WHERE p.user_id = $1 AND pm.supplier_id = $2
@@ -89,7 +90,24 @@ async function mapExtractedInvoice(pool, gemini, userId) {
       if (product) {
         corresponding.items[index].product_id = product.product_id;
         corresponding.items[index].name = product.product_name;
-        corresponding.items[index].unit = product.local_unit || product.primary_unit || gemini.items[index].unit;
+        const rate = Number(product.conversion_rate_to_local);
+        const extractedQuantity = Number(gemini.items[index].quantity);
+        if (Number.isFinite(rate) && rate > 0 && Number.isFinite(extractedQuantity) && extractedQuantity > 0) {
+          const convertedQuantity = extractedQuantity * rate;
+          const extractedTotal = Number(gemini.items[index].total_price);
+          const extractedPrice = Number(gemini.items[index].unit_price);
+          corresponding.items[index].quantity = convertedQuantity;
+          corresponding.items[index].unit = product.local_unit || product.primary_unit || gemini.items[index].unit;
+          corresponding.items[index].unit_price = Number.isFinite(extractedTotal) && extractedTotal >= 0
+            ? extractedTotal / convertedQuantity
+            : Number.isFinite(extractedPrice) ? extractedPrice / rate : gemini.items[index].unit_price;
+          corresponding.items[index].conversion_rate = rate;
+        } else {
+          const sameUnit = String(product.provider_unit || '').trim().toLocaleLowerCase('vi-VN')
+            === String(product.local_unit || '').trim().toLocaleLowerCase('vi-VN');
+          corresponding.items[index].unit = sameUnit ? product.local_unit : gemini.items[index].unit;
+          corresponding.items[index].conversion_rate = null;
+        }
       }
     }
   } catch (error) {

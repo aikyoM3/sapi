@@ -11,6 +11,7 @@
       .read-name{white-space:normal;overflow-wrap:anywhere;line-height:1.35}.suggestion-wrap{position:relative}.suggestions{position:absolute;z-index:20;left:0;right:0;top:100%;max-height:240px;overflow:auto;background:white;border:1px solid var(--tblr-border-color);box-shadow:var(--tblr-box-shadow);display:none}.suggestions.show{display:block}.suggestion{padding:.55rem .75rem;cursor:pointer}.suggestion:hover,.suggestion.active{background:var(--tblr-primary-lt);color:var(--tblr-primary)}
       .summary{width:min(100%,420px);margin-left:auto}.summary-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0}.summary-total{border-top:1px solid var(--tblr-border-color);font-size:1.15rem;font-weight:700}.invoice-images{display:flex;gap:1rem;overflow:auto}.invoice-images figure{min-width:260px;margin:0}.invoice-images img{width:260px;height:340px;object-fit:contain;background:#f1f3f5}
       #gemini-dialog{width:min(90vw,800px);max-height:80vh;border:1px solid var(--tblr-border-color);border-radius:.5rem}#gemini-dialog pre{white-space:pre-wrap}
+      #conversion-dialog{width:min(95vw,1000px);max-height:88vh;border:1px solid var(--tblr-border-color);border-radius:.5rem;padding:0}#conversion-dialog::backdrop{background:#0008}
     </style>
   </head>
   <body><div class="page">
@@ -38,6 +39,15 @@
     </div>
   </div>
   <dialog id="gemini-dialog"><div class="d-flex justify-content-between mb-3"><strong>OCR result</strong><button id="close-gemini" class="btn btn-sm btn-outline-secondary">Đóng</button></div><pre id="gemini-json"></pre></dialog>
+  <dialog id="conversion-dialog">
+    <div class="card border-0">
+      <div class="card-header"><h3 class="card-title">Quy đổi đơn vị mới</h3></div>
+      <div class="card-body"><p>SAPI phát hiện số lượng và đơn vị sử dụng khác dữ liệu đọc được. Chọn những quy đổi cần ghi nhớ cho các hóa đơn sau.</p><div id="conversion-conflicts" class="alert alert-warning d-none"></div>
+        <div class="table-responsive"><table class="table table-vcenter"><thead><tr><th>Hàng hóa</th><th>Đọc được</th><th>Sử dụng</th><th>Quy đổi đề xuất</th><th class="text-center">Lưu</th></tr></thead><tbody id="conversion-rows"></tbody></table></div>
+      </div>
+      <div class="card-footer d-flex flex-wrap justify-content-end gap-2"><button id="conversion-back" class="btn" type="button">Quay lại chỉnh sửa</button><button id="conversion-once" class="btn btn-outline-primary" type="button">Chỉ áp dụng hóa đơn này</button><button id="conversion-save" class="btn btn-primary" type="button">Lưu và xác nhận</button></div>
+    </div>
+  </dialog>
   <script src="./app.js"></script>
   <script>
     const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
@@ -47,6 +57,8 @@
     let confirming = false;
     const numberValue = (element) => Math.max(0, Number(element.value) || 0);
     const text = (value) => value === null || value === undefined ? '' : String(value);
+    const normalizedUnit = (value) => text(value).trim().toLocaleLowerCase('vi-VN').replace(/\s+/g, ' ');
+    const closeNumber = (left, right) => Math.abs(Number(left) - Number(right)) <= Math.max(0.000001, Math.abs(Number(right)) * 0.000001);
     function initialUsedPrice(item, mapped) {
       const quantity = Number(mapped?.quantity ?? item.quantity); const total = Number(item.total_price); const price = Number(mapped?.unit_price ?? item.unit_price);
       if (quantity > 0 && item.total_price !== null && item.total_price !== undefined && Number.isFinite(total) && total >= 0
@@ -99,13 +111,13 @@
     function createInput(className, value, type = 'text') { const input = document.createElement('input'); input.className = `form-control ${className}`; input.type = type; input.value = text(value); if (type === 'number') { input.min = '0'; input.step = '0.01'; } return input; }
     function td(content, className = '') { const cell = document.createElement('td'); cell.className = className; if (content instanceof HTMLElement) cell.append(content); else cell.textContent = text(content); return cell; }
     function addItem(item, mapped, index) {
-      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit);
+      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit); row.dataset.externalQuantity = text(item.quantity); row.dataset.externalTotal = text(item.total_price); row.dataset.conversionRate = text(mapped?.conversion_rate);
       if (item.line_status === 'UNCERTAIN') row.classList.add('table-warning');
       const productWrap = document.createElement('div'); productWrap.className = 'suggestion-wrap';
       const productInput = createInput('product-name', mapped?.name); productInput.dataset.productId = text(mapped?.product_id);
-      productInput.addEventListener('input', () => { productInput.dataset.productId = ''; });
+      productInput.addEventListener('input', () => { productInput.dataset.productId = ''; row.dataset.conversionRate = ''; });
       const suggestions = document.createElement('div'); suggestions.className = 'suggestions'; productWrap.append(productInput, suggestions);
-      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; row.querySelector('.line-unit').value = text(product.primary_unit); });
+      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; row.dataset.conversionRate = ''; row.querySelector('.line-unit').value = text(product.primary_unit); });
       const usedPrice = initialUsedPrice(item, mapped); const normalized = item.total_price != null && item.quantity > 0 && Number(item.unit_price) * Number(item.quantity) !== Number(item.total_price);
       const details = [item.package_quantity && `${item.package_quantity} ${text(item.package_unit)}`.trim(), item.price_unit && `Giá theo ${item.price_unit}`, normalized && 'Đơn giá sử dụng đã quy đổi theo thành tiền', item.line_type === 'PROMOTION_ITEM' && 'Hàng khuyến mại', item.line_status === 'UNCERTAIN' && `Cần kiểm tra: ${text(item.status_reason)}`].filter(Boolean).join(' · ');
       row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), td(details), td(item.unit_price, 'text-end'), td(createInput('line-price text-end', usedPrice, 'number')), td(item.total_price, 'text-end'));
@@ -119,6 +131,67 @@
       row.querySelectorAll('input').forEach((input) => input.setAttribute('aria-label', `${input.classList.contains('product-name') ? 'Hàng hóa tương ứng' : input.classList.contains('line-quantity') ? 'Số lượng sử dụng' : input.classList.contains('line-unit') ? 'Đơn vị sử dụng' : 'Đơn giá sử dụng'} dòng ${index + 1}`));
       row.querySelectorAll('input[type="number"]').forEach((input) => { input.required = true; });
       row.querySelector('.line-quantity').min = '0.01';
+    }
+    function invoiceItems() {
+      return [...itemsBody.querySelectorAll('.invoice-line')].map((row) => ({
+        productId: Number(row.querySelector('.product-name').dataset.productId),
+        productName: row.querySelector('.product-name').value,
+        externalName: row.dataset.externalName,
+        externalUnit: row.dataset.externalUnit,
+        externalQuantity: row.dataset.externalQuantity,
+        quantity: row.querySelector('.line-quantity').value,
+        unit: row.querySelector('.line-unit').value,
+        unitPrice: row.querySelector('.line-price').value,
+        externalTotal: row.dataset.externalTotal,
+        savedConversionRate: row.dataset.conversionRate,
+      }));
+    }
+    function conversionProposals(items) {
+      const proposals = new Map();
+      for (const item of items) {
+        const readQuantity = Number(item.externalQuantity); const usedQuantity = Number(item.quantity);
+        if (!(readQuantity > 0) || !(usedQuantity > 0) || !item.externalUnit || !item.unit
+            || normalizedUnit(item.externalUnit) === normalizedUnit(item.unit) || closeNumber(readQuantity, usedQuantity)) continue;
+        const rate = usedQuantity / readQuantity; const savedRate = Number(item.savedConversionRate);
+        if (savedRate > 0 && closeNumber(savedRate, rate)) continue;
+        const key = `${item.productId}|${normalizedUnit(item.externalName)}|${normalizedUnit(item.externalUnit)}`;
+        const calculatedTotal = usedQuantity * Number(item.unitPrice); const readTotal = Number(item.externalTotal);
+        const totalConflict = item.externalTotal !== '' && Number.isFinite(readTotal)
+          && !closeNumber(calculatedTotal, readTotal);
+        const current = proposals.get(key);
+        const proposal = current || { key, productId:item.productId, productName:item.productName, externalName:item.externalName, externalUnit:item.externalUnit, localUnit:item.unit, readQuantity, usedQuantity, conversionRate:rate, savedRate:savedRate > 0 ? savedRate : null, lineCount:0, conflict:null };
+        proposal.lineCount += 1;
+        if (current && (!closeNumber(current.conversionRate, rate) || normalizedUnit(current.localUnit) !== normalizedUnit(item.unit))) proposal.conflict = 'Các dòng cùng hàng hóa đang cho hệ số quy đổi khác nhau.';
+        if (totalConflict) proposal.conflict = 'Thành tiền sử dụng không khớp thành tiền đọc được.';
+        proposals.set(key, proposal);
+      }
+      return [...proposals.values()];
+    }
+    function reviewConversions(proposals) {
+      if (!proposals.length) return Promise.resolve([]);
+      const dialog = document.querySelector('#conversion-dialog'); const body = document.querySelector('#conversion-rows'); body.replaceChildren();
+      let conflictCount = 0;
+      proposals.forEach((proposal, index) => {
+        const row = document.createElement('tr');
+        const add = (value) => { const cell = document.createElement('td'); cell.textContent = value; row.append(cell); };
+        add(`${proposal.productName || proposal.externalName}${proposal.lineCount > 1 ? ` (${proposal.lineCount} dòng)` : ''}`);
+        add(`${money.format(proposal.readQuantity)} ${proposal.externalUnit}`); add(`${money.format(proposal.usedQuantity)} ${proposal.localUnit}`);
+        add(proposal.conflict ? proposal.conflict : `1 ${proposal.externalUnit} = ${money.format(proposal.conversionRate)} ${proposal.localUnit}${proposal.savedRate ? ` (đang lưu: ${money.format(proposal.savedRate)})` : ''}`);
+        const choice = document.createElement('td'); choice.className = 'text-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'form-check-input conversion-choice'; checkbox.dataset.index = index; checkbox.checked = !proposal.conflict; checkbox.disabled = Boolean(proposal.conflict); choice.append(checkbox); row.append(choice); body.append(row);
+        if (proposal.conflict) { row.classList.add('table-warning'); conflictCount += 1; }
+      });
+      const warning = document.querySelector('#conversion-conflicts'); warning.textContent = conflictCount ? `${conflictCount} đề xuất có xung đột nên không thể lưu. Bạn có thể quay lại sửa hoặc chỉ áp dụng dữ liệu cho hóa đơn này.` : ''; warning.classList.toggle('d-none', !conflictCount);
+      document.querySelector('#conversion-save').disabled = !proposals.some((proposal) => !proposal.conflict);
+      return new Promise((resolve) => {
+        const finish = (result) => { dialog.close(); resolve(result); };
+        document.querySelector('#conversion-back').onclick = () => finish(null);
+        document.querySelector('#conversion-once').onclick = () => finish([]);
+        document.querySelector('#conversion-save').onclick = () => finish([...body.querySelectorAll('.conversion-choice:checked')].map((checkbox) => {
+          const proposal = proposals[Number(checkbox.dataset.index)]; return { productId:proposal.productId,externalName:proposal.externalName,externalUnit:proposal.externalUnit,localUnit:proposal.localUnit,conversionRate:proposal.conversionRate };
+        }));
+        dialog.oncancel = (event) => { event.preventDefault(); finish(null); };
+        dialog.showModal();
+      });
     }
     function updateTotals() {
       const rows = [...itemsBody.querySelectorAll('.invoice-line')];
@@ -149,10 +222,10 @@
       if (!rows.length) { updateTotals(); return; }
       for (const input of itemsBody.querySelectorAll('input[type="number"]')) { if (!input.reportValidity()) return; }
       if (!Number(document.querySelector('#supplier-id').value) || rows.some((row) => !Number(row.querySelector('.product-name').dataset.productId))) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = 'Hãy chọn nhà cung cấp và hàng hóa tương ứng từ danh mục KiotViet.'; return; }
+      const items = invoiceItems(); const unitConversions = await reviewConversions(conversionProposals(items)); if (unitConversions === null) return;
       const button = document.querySelector('#confirm'); confirming = true; button.disabled = true; button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang xác nhận…'; document.querySelectorAll('.delete-line').forEach((remove) => { remove.disabled = true; }); document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Đang tạo phiếu nhập nháp trên KiotViet…';
       try {
-        const items = Array.from(document.querySelectorAll('.invoice-line')).map((row) => ({ productId: Number(row.querySelector('.product-name').dataset.productId), externalName: row.dataset.externalName, externalUnit: row.dataset.externalUnit, quantity: row.querySelector('.line-quantity').value, unit: row.querySelector('.line-unit').value, unitPrice: row.querySelector('.line-price').value }));
-        const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierId: Number(document.querySelector('#supplier-id').value) || null, supplierName: document.querySelector('#supplier-name').value, supplierPhone: document.querySelector('#supplier-phone').value, supplierAddress: document.querySelector('#supplier-address').value, invoiceNumber: document.querySelector('#invoice-number').value, invoiceDate: document.querySelector('#invoice-date').value || null, discountAmount: document.querySelector('#discount').value, items }) });
+        const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierId: Number(document.querySelector('#supplier-id').value) || null, supplierName: document.querySelector('#supplier-name').value, supplierPhone: document.querySelector('#supplier-phone').value, supplierAddress: document.querySelector('#supplier-address').value, invoiceNumber: document.querySelector('#invoice-number').value, invoiceDate: document.querySelector('#invoice-date').value || null, discountAmount: document.querySelector('#discount').value, items, unitConversions }) });
         document.querySelector('#notice').className = `alert alert-${result.status === 'SYNCED' ? 'success' : 'warning'}`;
         document.querySelector('#notice').textContent = result.status === 'SYNCED'
           ? `Đã lưu hóa đơn #${result.invoiceId} và tạo phiếu nhập KiotViet ${result.kiotVietPurchaseOrderCode || `#${result.kiotVietPurchaseOrderId}`}.`

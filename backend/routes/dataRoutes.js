@@ -7,6 +7,12 @@ const { KiotVietError } = require('../kiotviet');
 const router = express.Router();
 const searchTerm = (value) => String(value || '').trim().slice(0, 100);
 const textField = (value, max = 255) => String(value ?? '').trim().slice(0, max);
+const optionalPositiveNumber = (value) => {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) throw Object.assign(new Error('Hệ số quy đổi phải lớn hơn 0.'), { statusCode: 400 });
+  return number;
+};
 
 module.exports = function dataRoutes(pool) {
   router.get('/network/status', (_req, res, next) => {
@@ -153,7 +159,8 @@ module.exports = function dataRoutes(pool) {
     try {
       const { rows } = await pool.query(`
         SELECT pm.mapping_id, s.supplier_name, p.product_name AS local_product_name,
-               pm.provider_product_code, pm.provider_product_name, pm.provider_unit, pm.local_unit
+               pm.provider_product_code, pm.provider_product_name, pm.provider_unit, pm.local_unit,
+               pm.conversion_rate_to_local
         FROM productmapping pm
         JOIN product p ON p.product_id = pm.local_product_id AND p.user_id = $1
         LEFT JOIN supplier s ON s.supplier_id = pm.supplier_id AND s.user_id = $1
@@ -166,8 +173,8 @@ module.exports = function dataRoutes(pool) {
   router.put('/product-mappings/:id', async (req, res, next) => {
     try {
       const result = await pool.query(`UPDATE productmapping pm SET provider_product_code=$1,provider_product_name=$2,
-        provider_unit=$3,local_unit=$4 FROM product p WHERE pm.mapping_id=$5 AND pm.local_product_id=p.product_id
-        AND p.user_id=$6 RETURNING pm.mapping_id`, [textField(req.body.providerProductCode) || null, textField(req.body.providerProductName) || null, textField(req.body.providerUnit, 100) || null, textField(req.body.localUnit, 100) || null, req.params.id, currentUserId(req)]);
+        provider_unit=$3,local_unit=$4,conversion_rate_to_local=$5 FROM product p WHERE pm.mapping_id=$6 AND pm.local_product_id=p.product_id
+        AND p.user_id=$7 RETURNING pm.mapping_id`, [textField(req.body.providerProductCode) || null, textField(req.body.providerProductName) || null, textField(req.body.providerUnit, 100) || null, textField(req.body.localUnit, 100) || null, optionalPositiveNumber(req.body.conversionRate), req.params.id, currentUserId(req)]);
       if (!result.rowCount) return res.status(404).json({ error: 'Không tìm thấy dữ liệu đối chiếu.' }); res.json({ updated: true });
     } catch (error) { next(error); }
   });

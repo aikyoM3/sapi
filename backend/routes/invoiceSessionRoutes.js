@@ -23,6 +23,9 @@ const SESSION_HOURS = 12;
 
 const token = () => crypto.randomBytes(32).toString('base64url');
 const safeText = (value, max = 255) => String(value || '').trim().slice(0, max);
+const normalizedText = (value) => safeText(value).toLocaleLowerCase('vi-VN').replace(/\s+/g, ' ');
+const closeNumber = (left, right) => Math.abs(Number(left) - Number(right)) <= Math.max(0.000001, Math.abs(Number(right)) * 0.000001);
+const conversionKey = (productId, externalName, externalUnit) => `${productId}|${normalizedText(externalName)}|${normalizedText(externalUnit)}`;
 const nonNegative = (value, field) => {
   if (value === null || value === undefined || (typeof value === 'string' && !value.trim()) || !['string', 'number'].includes(typeof value)) throw Object.assign(new Error(`${field} chưa được điền.`), { statusCode: 400 });
   const number = Number(value);
@@ -287,6 +290,7 @@ module.exports = function invoiceSessionRoutes(pool) {
         productId: Number(item.productId),
         externalName: safeText(item.externalName),
         externalUnit: safeText(item.externalUnit, 100) || null,
+        externalQuantity: item.externalQuantity === null || item.externalQuantity === undefined || String(item.externalQuantity).trim() === '' ? null : nonNegative(item.externalQuantity, `Số lượng đọc được dòng ${index + 1}`),
         quantity: nonNegative(item.quantity, `Số lượng dòng ${index + 1}`),
         unit: safeText(item.unit, 100) || null,
         unitPrice: nonNegative(item.unitPrice, `Đơn giá dòng ${index + 1}`),
@@ -300,6 +304,37 @@ module.exports = function invoiceSessionRoutes(pool) {
       const session = sessionResult.rows[0];
       if (!session) throw Object.assign(new Error('Không tìm thấy phiên hóa đơn.'), { statusCode: 404 });
       if (session.status !== 'READY_FOR_REVIEW') throw Object.assign(new Error('Phiên chưa sẵn sàng để xác nhận.'), { statusCode: 409 });
+      const requestedConversions = Array.isArray(req.body.unitConversions) ? req.body.unitConversions : [];
+      if (requestedConversions.length > normalized.length) throw Object.assign(new Error('Danh sách quy đổi đơn vị không hợp lệ.'), { statusCode: 400 });
+      const extractedItems = Array.isArray(session.ocr_result?.gemini?.items) ? session.ocr_result.gemini.items : [];
+      const conversionsByKey = new Map();
+      for (const requested of requestedConversions) {
+        const productId = Number(requested.productId);
+        const externalName = safeText(requested.externalName);
+        const externalUnit = safeText(requested.externalUnit, 100);
+        const localUnit = safeText(requested.localUnit, 100);
+        const rate = Number(requested.conversionRate);
+        if (!Number.isInteger(productId) || productId <= 0 || !externalName || !externalUnit || !localUnit || !Number.isFinite(rate) || rate <= 0 || rate > 1000000) {
+          throw Object.assign(new Error('Quy đổi đơn vị không hợp lệ.'), { statusCode: 400 });
+        }
+        const line = normalized.find((item) => item.productId === productId
+          && normalizedText(item.externalName) === normalizedText(externalName)
+          && normalizedText(item.externalUnit) === normalizedText(externalUnit)
+          && normalizedText(item.unit) === normalizedText(localUnit)
+          && item.externalQuantity > 0);
+        const extracted = extractedItems.find((item) => normalizedText(item.name) === normalizedText(externalName)
+          && normalizedText(item.unit) === normalizedText(externalUnit)
+          && Number(item.quantity) > 0 && closeNumber(item.quantity, line?.externalQuantity));
+        if (!line || !extracted || normalizedText(externalUnit) === normalizedText(localUnit)
+            || closeNumber(line.quantity, line.externalQuantity) || !closeNumber(rate, line.quantity / line.externalQuantity)) {
+          throw Object.assign(new Error('Quy đổi không khớp dữ liệu hóa đơn đã chỉnh sửa.'), { statusCode: 400 });
+        }
+        const key = conversionKey(productId, externalName, externalUnit);
+        if (conversionsByKey.has(key) && !closeNumber(conversionsByKey.get(key).rate, rate)) {
+          throw Object.assign(new Error('Một hàng hóa có nhiều hệ số quy đổi xung đột.'), { statusCode: 400 });
+        }
+        conversionsByKey.set(key, { rate, localUnit });
+      }
       const productIds = [...new Set(normalized.map((item) => item.productId))];
       const productCheck = await client.query('SELECT product_id, product_code FROM product WHERE user_id = $1 AND product_id = ANY($2::int[])', [currentUserId(req), productIds]);
       if (productCheck.rowCount !== productIds.length) throw Object.assign(new Error('Có hàng hóa không thuộc account hiện tại.'), { statusCode: 403 });
@@ -359,9 +394,15 @@ module.exports = function invoiceSessionRoutes(pool) {
           [invoice.rows[0].invoice_id, item.productId, item.quantity, item.unit, item.unitPrice, item.quantity * item.unitPrice],
         );
         if (item.externalName) {
-          const mapping = await client.query("SELECT mapping_id FROM productmapping WHERE supplier_id = $1 AND LOWER(provider_product_name) = LOWER($2) AND LOWER(COALESCE(provider_unit,'')) = LOWER(COALESCE($3,'')) LIMIT 1", [supplierId, item.externalName, item.externalUnit]);
-          if (mapping.rowCount) await client.query('UPDATE productmapping SET local_product_id = $1, provider_unit = $2, local_unit = $3 WHERE mapping_id = $4', [item.productId, item.externalUnit, item.unit, mapping.rows[0].mapping_id]);
-          else await client.query('INSERT INTO productmapping (supplier_id, local_product_id, provider_product_name, provider_unit, local_unit) VALUES ($1, $2, $3, $4, $5)', [supplierId, item.productId, item.externalName, item.externalUnit, item.unit]);
+          const selectedConversion = conversionsByKey.get(conversionKey(item.productId, item.externalName, item.externalUnit));
+          const mapping = await client.query("SELECT mapping_id,local_product_id,conversion_rate_to_local FROM productmapping WHERE supplier_id = $1 AND LOWER(provider_product_name) = LOWER($2) AND LOWER(COALESCE(provider_unit,'')) = LOWER(COALESCE($3,'')) LIMIT 1", [supplierId, item.externalName, item.externalUnit]);
+          if (mapping.rowCount) {
+            const sameProduct = Number(mapping.rows[0].local_product_id) === item.productId;
+            const rate = selectedConversion?.rate ?? (sameProduct ? mapping.rows[0].conversion_rate_to_local : null);
+            await client.query('UPDATE productmapping SET local_product_id=$1,provider_unit=$2,local_unit=$3,conversion_rate_to_local=$4 WHERE mapping_id=$5', [item.productId, item.externalUnit, item.unit, rate, mapping.rows[0].mapping_id]);
+          } else {
+            await client.query('INSERT INTO productmapping (supplier_id,local_product_id,provider_product_name,provider_unit,local_unit,conversion_rate_to_local) VALUES ($1,$2,$3,$4,$5,$6)', [supplierId, item.productId, item.externalName, item.externalUnit, item.unit, selectedConversion?.rate ?? null]);
+          }
         }
       }
       const externalSupplierName = safeText(session.ocr_result?.gemini?.supplier?.name);

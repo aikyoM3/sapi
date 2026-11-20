@@ -11,7 +11,8 @@
     "test:kiotviet:mock": "node scripts/test-kiotviet-mock-purchase-order.js",
     "experiment:gemini": "node scripts/gemini-experiment.js",
     "test:gemini-experiment": "node scripts/test-gemini-experiment.js",
-    "test:gemini-config": "node scripts/test-gemini-config.js"
+    "test:gemini-config": "node scripts/test-gemini-config.js",
+    "test:unit-conversion": "node scripts/test-unit-conversion.js"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",

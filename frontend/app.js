@@ -91,6 +91,7 @@ const pageConfigs = {
       ['provider_product_name', 'Tên hàng nhà cung cấp'],
       ['provider_unit', 'Đơn vị nhà cung cấp'],
       ['local_unit', 'Đơn vị nội bộ'],
+      ['conversion_rate_to_local', 'Hệ số quy đổi', formatAmount],
       ['actions', 'Thao tác', (_value, row) => editAction('mappings', row.mapping_id), true],
     ],
   },
@@ -108,7 +109,7 @@ let loadedTableName = null;
 let loadedTableRows = [];
 let invoiceRefreshTimer = null;
 const editConfigs = {
-  mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductCode','provider_product_code','Mã hàng nhà cung cấp'],['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ']] },
+  mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductCode','provider_product_code','Mã hàng nhà cung cấp'],['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ'],['conversionRate','conversion_rate_to_local','Hệ số quy đổi sang đơn vị nội bộ','number']] },
   supplierMappings: { title: 'Chỉnh sửa đối chiếu nhà cung cấp', id: 'supplier_mapping_id', endpoint: '/api/supplier-mappings', fields: [['providerSupplierName','provider_supplier_name','Tên nhà cung cấp trên hóa đơn']] },
 };
 
