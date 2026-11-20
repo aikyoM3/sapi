@@ -142,7 +142,6 @@ module.exports = function dataRoutes(pool) {
   router.get('/suppliers/search', async (req, res, next) => {
     try {
       const query = searchTerm(req.query.q);
-      if (query.length < 2) return res.json([]);
       const { rows } = await pool.query(`
         SELECT DISTINCT s.supplier_id, s.supplier_name, s.phone_number, s.address
         FROM supplier s

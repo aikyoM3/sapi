@@ -63,8 +63,13 @@ async function lookupMappedSupplier(pool, userId, extractedName) {
     FROM supplier s
     LEFT JOIN suppliermapping sm ON sm.local_supplier_id = s.supplier_id
     WHERE s.user_id = $1
-      AND LOWER(sm.provider_supplier_name) = LOWER($2)
-    ORDER BY s.supplier_id
+      AND (
+        LOWER(TRIM(sm.provider_supplier_name)) = LOWER(TRIM($2))
+        OR LOWER(TRIM(s.supplier_name)) = LOWER(TRIM($2))
+      )
+    ORDER BY
+      CASE WHEN LOWER(TRIM(sm.provider_supplier_name)) = LOWER(TRIM($2)) THEN 0 ELSE 1 END,
+      s.supplier_id
     LIMIT 1
     `,
     [userId, extractedName],
