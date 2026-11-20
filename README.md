@@ -29,14 +29,12 @@ Do this on a clean machine (or after cloning the repo). One Node process serves 
    copy backend\.env.example backend\.env
    ```
 
-   Edit `backend/.env` and set a development key from [Google AI Studio](https://aistudio.google.com/app/apikey). Do not put a key in source files or frontend code.
+   Edit `backend/.env` and set one API key from [Google AI Studio](https://aistudio.google.com/app/apikey). Do not put the key in source files or frontend code.
 
    | Variable | Required for Gemini test? | Notes |
    | --- | --- | --- |
-   | `GEMINI_API_KEY_1` / `GEMINI_BASE_URL_1` | Recommended | First development provider; use Google's HTTPS root for an AI Studio key |
-   | `GEMINI_API_KEY_2` / `GEMINI_BASE_URL_2` | No | Optional second provider |
-   | `GEMINI_API_KEY` / `GEMINI_BASE_URL` | Yes if no numbered key | Legacy pair; when numbered providers exist this becomes the final fallback |
-   | `GEMINI_ALLOWED_BASE_URLS` | No | Additional trusted HTTPS origins allowed for personal keys, comma-separated; Google is always allowed |
+   | `GEMINI_API_KEY` | Yes | API key dùng để đọc hóa đơn; chỉ lưu trong `backend/.env` |
+   | `GEMINI_BASE_URL` | No | Mặc định `https://generativelanguage.googleapis.com`; mỗi cấu hình chỉ dùng một key với một host |
    | `GEMINI_MODEL` | No | Recommended `gemini-3.8-flash` |
    | `GEMINI_FALLBACK_MODEL` | No | Recommended `gemini-3.6-flash`; keep a genuinely different model available to the key |
    | `GEMINI_TIMEOUT_MS` | No | Default `120000` (2 minutes). Vision extraction often exceeds 30s. |
@@ -63,45 +61,25 @@ Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, st
 
 **After any change to `backend/.env` you must restart the server.** `dotenv` only reads the file at process start. Ctrl+C, then `npm.cmd start` again. Filling the key while Node is already running has no effect.
 
-### Gemini qua ShopAIKey (tùy chọn)
+### Cấu hình Gemini
 
-SAPI vẫn dùng `@google/genai`, cùng prompt/schema và ngữ cảnh cửa hàng; chỉ thay endpoint và thông tin xác thực. Không cần cài Claude Code, Gemini CLI hoặc chạy script cài đặt của nhà bán.
+Trong triển khai thực tế, mỗi cấu hình SAPI dùng đúng **một API key và một API host**. Mặc định host là Google AI Studio:
 
 ```dotenv
-GEMINI_BASE_URL=https://api.shopaikey.com
-GEMINI_API_KEY=your-private-shopaikey-key
-GEMINI_DEV_USE_ENV_KEY=true
+GEMINI_API_KEY=your-google-ai-studio-key
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 GEMINI_MODEL=gemini-3.8-flash
 GEMINI_FALLBACK_MODEL=gemini-3.6-flash
 GEMINI_TIMEOUT_MS=120000
 ```
 
-Có thể ưu tiên key Google miễn phí rồi mới dùng gateway trả phí mà không đưa bí mật ra frontend:
+Đặt key thật chỉ trong `backend/.env`, file đã được gitignore. Không thêm `/v1` vào URL của Google GenAI SDK. Sau khi đổi key, host hoặc model, phải restart backend.
 
-```dotenv
-GEMINI_API_KEY_1=your-google-ai-studio-key
-GEMINI_BASE_URL_1=https://generativelanguage.googleapis.com
-GEMINI_API_KEY=your-private-shopaikey-key
-GEMINI_BASE_URL=https://api.shopaikey.com
-```
+Người dùng cũng có thể nhập key và host trong màn hình **Sửa thông tin → Gemini API**. Host mặc định vẫn là Google AI Studio; key và host đã lưu được mã hóa trong database và không được trả lại frontend. Một tài khoản tại một thời điểm chỉ sử dụng một cặp key/host đã chọn.
 
-Với tài khoản đã chọn **Dùng key development**, backend thử toàn bộ model chính/dự phòng trên provider thứ nhất trước. Chỉ lỗi kết nối, timeout, quota, quyền/model hoặc lỗi máy chủ phù hợp mới chuyển sang provider tiếp theo. Lỗi request/schema HTTP 400 không bị gửi sang host khác. Log lần gọi ghi provider/model đã dùng nhưng không ghi key.
-
-Đặt key development thật **chỉ trong `backend/.env`**, file đã gitignore; không đưa key này ra frontend. Không thêm `/v1` vào URL của Google GenAI SDK. Cả kiểm tra kết nối và trích xuất đều dùng đúng key/host đã chọn cho tài khoản.
-
-Trong thông tin kết nối Gemini:
-
-- **Bỏ tick (cấu hình cá nhân)**: host mặc định `https://generativelanguage.googleapis.com` cho key Google AI Studio. Cho sửa host để dùng dịch vụ tương thích giao thức Gemini API. Key và host cá nhân được mã hóa trước khi lưu. Cấu hình này không phụ thuộc host/key development.
-- **Tick “Dùng key development”**: backend dùng chuỗi provider đánh số rồi đến cặp legacy trong `.env`. Hai ô key/host cá nhân bị vô hiệu hóa; form không hiện host thật hay nhà cung cấp development. API trạng thái không trả host/provider development. Request từ trình duyệt không được đổi host/key development; không lưu bản sao key development vào DB. Đổi cấu hình này trong `.env` rồi restart server.
-- Nhấn **Kiểm tra và lưu API Key** để áp dụng lựa chọn cho tài khoản hiện tại. `GEMINI_DEV_USE_ENV_KEY=true` chỉ cho phép chọn development, không tự áp dụng cho tài khoản mới chưa chọn. Đặt `false` để tắt quyền này. Các kết nối development đã lưu trước vẫn được đọc tương thích.
-- Host cá nhân khác Google cần được quản trị viên cho phép qua `GEMINI_ALLOWED_BASE_URLS=https://trusted-gateway.example` (nhiều host ngăn bằng dấu phẩy), rồi restart. Điều này ngăn backend truy cập host tùy ý/SSRF. Không công khai danh sách host này qua giao diện. Key và host phải thuộc cùng nhà cung cấp; backend chặn key Google gửi sang gateway và ngược lại.
-- Không thay đổi schema, hóa đơn, mapping hoặc KiotViet khi chuyển chế độ. Kết nối cũ được đọc tương thích; nếu key gateway đã lưu từ trước không còn trùng key `.env`, hãy chọn lại development và lưu.
-
-Model chính/dự phòng vẫn cấu hình qua `GEMINI_MODEL` và `GEMINI_FALLBACK_MODEL`. Model phải được nhà cung cấp đã chọn hỗ trợ; sửa host không tự chuyển đổi sang giao thức OpenAI/Anthropic. Nếu gặp quota/model không khả dụng, thông báo riêng thay vì kết luận key sai.
+Model chính và model dự phòng dùng chung cặp key/host, được cấu hình qua `GEMINI_MODEL` và `GEMINI_FALLBACK_MODEL`. Nếu key không được cấp quyền dùng model đã chọn, SAPI sẽ báo lỗi để người dùng kiểm tra lại cấu hình.
 
 Hai prompt được giữ trong `backend/services/geminiInvoicePrompt.js`: `compact` là bản ngắn mặc định và `detailed` là bản đầy đủ. Cả hai giữ nguyên quy tắc đơn vị/quy cách. Fallback prompt chỉ kích hoạt khi response rỗng, JSON lỗi hoặc sai schema; backend không thể tự phát hiện một giá trị sai về nghiệp vụ nhưng vẫn hợp lệ về schema, nên các trường hợp đó vẫn cần người dùng kiểm tra hoặc thực nghiệm A/B.
-
-ShopAIKey là bên trung gian xử lý request, không phải quota Google AI Studio của bạn. Kiểm tra gói có đúng model, hỗ trợ ảnh và structured JSON; lưu tên gateway trong phương pháp thực nghiệm. Dùng tên lượt riêng `gemini-26-shopaikey`, không trộn với `gemini-26` đã gọi trực tiếp Google. Xem [hướng dẫn SDK của nhà cung cấp](https://shopaikey.com/docs/google-genai).
 
 Kiểm thử cấu hình offline, không gửi ảnh hay trừ credit: `cd backend`, rồi `npm.cmd run test:gemini-config`.
 
@@ -152,8 +130,7 @@ The red text on **Tải ảnh hóa đơn** is the next action. Also look at the 
 | `Gemini chưa được cấu hình…` | Put a non-empty `GEMINI_API_KEY` in `backend/.env`, then **restart** the server. |
 | `GEMINI_API_KEY sai hoặc không có quyền…` | Create a new key in [Google AI Studio](https://aistudio.google.com/app/apikey), paste it into `backend/.env` with no quotes/spaces, restart. Enable the Generative Language API if asked. |
 | `Model Gemini không tồn tại…` | Check the configured endpoint and the key's model group. Keep `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL` set to models the key can use, then restart. |
-| `API không đủ credit…` | Check the balance/billing at the configured provider. Gateway credit is not Google Cloud credit. |
-| `Endpoint đang dùng gateway nhưng tài khoản vẫn lưu key Google…` | Reconnect that account using the gateway key. Updating `.env` alone does not replace the account's encrypted key. |
+| `API không đủ credit…` | Kiểm tra quota và billing của Google AI Studio/Google Cloud cho key đang dùng. |
 | `Gemini bị giới hạn quota/rate limit…` | Wait and retry. Check quota/billing in Google AI Studio. |
 | `Gemini hết thời gian chờ…` / terminal `This operation was aborted` | The HTTP client cancelled the call (default used to be 30s). Set `GEMINI_TIMEOUT_MS=120000` in `backend/.env`, **restart**, retry. Keep the upload tab open until Gemini finishes. |
 | `Gemini trả về JSON không hợp lệ` / `không đúng schema` | Extraction failed validation. Retry; do not invent data. Edit the prompt only in `backend/services/geminiInvoicePrompt.js`. |
