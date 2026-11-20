@@ -71,7 +71,10 @@ function readDescriptor(encrypted) {
 function resolveDescriptor(saved) {
   if (saved.source === 'google' || saved.source === 'personal') {
     if (typeof saved.apiKey !== 'string' || !saved.apiKey.trim()) throw new GeminiConfigurationError('API Key Google đã lưu bị trống. Hãy kết nối lại.');
-    return { source: 'stored', apiKey: saved.apiKey.trim(), ...personalEndpoint(saved.source === 'google' ? GOOGLE_BASE_URL : saved.baseUrl || GOOGLE_BASE_URL) };
+    const primary = { source: 'stored', apiKey: saved.apiKey.trim(), ...personalEndpoint(saved.source === 'google' ? GOOGLE_BASE_URL : saved.baseUrl || GOOGLE_BASE_URL) };
+    let fallbackConnections = [];
+    fallbackConnections = developmentConnections().filter((item) => item.apiKey !== primary.apiKey || item.baseUrl !== primary.baseUrl);
+    return fallbackConnections.length ? { ...primary, fallbackConnections } : primary;
   }
   if (!devEnabled()) throw new GeminiConfigurationError('Kết nối development đã bị tắt. Hãy cấu hình API Key Google riêng.');
   const connections = developmentConnections();
@@ -88,14 +91,12 @@ async function connectGemini(pool, userId, body) {
   if (!useDev && !saved.apiKey) throw Object.assign(new Error('Vui lòng nhập Gemini API Key.'), { statusCode: 400, code: 'GEMINI_KEY_REQUIRED' });
   const connection = resolveDescriptor(saved);
   if (!connection.apiKey) throw Object.assign(new Error('Vui lòng nhập Gemini API Key.'), { statusCode: 400, code: 'GEMINI_KEY_REQUIRED' });
-  if (connection.source === 'development') {
-    let verified = false; let lastError;
-    for (const candidate of [connection, ...(connection.fallbackConnections || [])]) {
-      try { await verifyGeminiApiKey(candidate.apiKey, candidate); verified = true; break; }
-      catch (error) { lastError = error; }
-    }
-    if (!verified) throw lastError;
-  } else await verifyGeminiApiKey(connection.apiKey, connection);
+  let verified = false; let lastError;
+  for (const candidate of [connection, ...(connection.fallbackConnections || [])]) {
+    try { await verifyGeminiApiKey(candidate.apiKey, candidate); verified = true; break; }
+    catch (error) { lastError = error; }
+  }
+  if (!verified) throw lastError;
   await pool.query(`INSERT INTO gemini_connections(user_id,api_key_encrypted) VALUES($1,$2)
     ON CONFLICT(user_id) DO UPDATE SET api_key_encrypted=EXCLUDED.api_key_encrypted,status='CONNECTED',connected_at=NOW(),last_verified_at=NOW()`, [userId, encryptSecret(JSON.stringify(saved))]);
 }

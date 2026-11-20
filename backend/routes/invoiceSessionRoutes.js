@@ -1,21 +1,23 @@
 const crypto = require('crypto');
-const fs = require('fs/promises');
 const express = require('express');
 const multer = require('multer');
 const QRCode = require('qrcode');
-const { extractInvoiceFromImagesDetailed } = require('../services/geminiInvoiceService');
-const { mapExtractedInvoice } = require('../services/invoiceMappingService');
 const { saveTemporaryImage, removeTemporaryImages } = require('../services/imageFileService');
+const { processInvoiceSession } = require('../services/invoiceSessionProcessingService');
 const { requireAuth, currentUserId } = require('../middleware/auth');
 const { getMobileBaseUrl } = require('../services/lanAddress');
 const { loadConnectionConfig } = require('../services/kiotVietConnectionService');
 const { buildPurchaseOrderPayload, createPurchaseOrder } = require('../kiotviet');
-const { loadGeminiConnection } = require('../services/geminiConnectionService');
 
 const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 12 },
+});
+const bulkUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 20 },
+  fileFilter: (_req, file, callback) => callback(null, /^image\/(jpeg|png|webp)$/i.test(file.mimetype)),
 });
 const SESSION_HOURS = 12;
 
@@ -78,22 +80,7 @@ async function addImages(pool, session, files) {
 
 async function processSession(pool, session) {
   try {
-    const { rows } = await pool.query(
-      'SELECT image_path, mime_type FROM invoicesessionimage WHERE invoice_session_id = $1 ORDER BY page_number',
-      [session.invoice_session_id],
-    );
-    const files = await Promise.all(rows.map(async (image) => ({ mimetype: image.mime_type, buffer: await fs.readFile(image.image_path) })));
-    const buyer = (await pool.query('SELECT store_name, tax_code, address, phone, email FROM users WHERE user_id=$1', [session.user_id])).rows[0] || {};
-    const details = await extractInvoiceFromImagesDetailed(files, {
-      connection: await loadGeminiConnection(pool, session.user_id),
-      buyer,
-    });
-    const gemini = details.invoice;
-    const corresponding = await mapExtractedInvoice(pool, gemini, session.user_id);
-    await pool.query(
-      "UPDATE invoicesession SET status='READY_FOR_REVIEW', ocr_result=$1, error_message=NULL, updated_at=NOW() WHERE invoice_session_id=$2 AND status='PROCESSING'",
-      [JSON.stringify({ gemini, corresponding }), session.invoice_session_id],
-    );
+    await processInvoiceSession(pool, session);
   } catch (error) {
     console.error('Invoice session processing failed:', error.message);
     await pool.query(
@@ -116,12 +103,45 @@ module.exports = function invoiceSessionRoutes(pool) {
     } catch (error) { next(error); }
   });
 
+  router.post('/api/invoice-sessions/bulk', requireAuth, bulkUpload.array('invoiceImages', 20), async (req, res, next) => {
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: 'Hãy chọn ít nhất một ảnh hóa đơn.' });
+    const saved = [];
+    const client = await pool.connect();
+    try {
+      for (const file of files) saved.push({ ...(await saveTemporaryImage(file)), originalName: safeText(file.originalname) });
+      const batchToken = token();
+      const promptVersion = ['compact', 'detailed'].includes(String(process.env.GEMINI_PROMPT_VERSION || '').toLowerCase())
+        ? String(process.env.GEMINI_PROMPT_VERSION).toLowerCase() : 'compact';
+      const sessions = [];
+      await client.query('BEGIN');
+      for (const image of saved) {
+        const session = (await client.query(`INSERT INTO invoicesession
+          (user_id,session_token,status,source_mode,batch_token,prompt_version,next_attempt_at,expires_at)
+          VALUES($1,$2,'QUEUED','BATCH',$3,$4,NOW(),NOW()+INTERVAL '7 days')
+          RETURNING invoice_session_id,session_token,status`,
+        [currentUserId(req), token(), batchToken, promptVersion])).rows[0];
+        await client.query(`INSERT INTO invoicesessionimage
+          (invoice_session_id,image_path,original_name,mime_type,file_size,page_number)
+          VALUES($1,$2,$3,$4,$5,1)`,
+        [session.invoice_session_id, image.imagePath, image.originalName, image.mimeType, image.fileSize]);
+        sessions.push({ sessionToken: session.session_token, status: session.status, fileName: image.originalName });
+      }
+      await client.query('COMMIT');
+      res.status(202).json({ batchToken, count: sessions.length, sessions });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      await removeTemporaryImages(saved.map((image) => image.imagePath));
+      next(error);
+    } finally { client.release(); }
+  });
+
   router.get('/api/invoice-sessions/:token/status', requireAuth, async (req, res, next) => {
     try {
       const session = await ownedSession(pool, currentUserId(req), req.params.token);
       if (!session) return res.status(404).json({ error: 'Không tìm thấy phiên hóa đơn.' });
       const count = await pool.query('SELECT COUNT(*)::int AS count FROM invoicesessionimage WHERE invoice_session_id = $1', [session.invoice_session_id]);
-      res.json({ status: session.status, imageCount: count.rows[0].count, error: session.error_message, expiresAt: session.expires_at });
+      res.json({ status: session.status, imageCount: count.rows[0].count, error: session.error_message, attempts: session.queue_attempts, nextAttemptAt: session.next_attempt_at, expiresAt: session.expires_at });
     } catch (error) { next(error); }
   });
 
@@ -228,6 +248,13 @@ module.exports = function invoiceSessionRoutes(pool) {
       if (!session) return res.status(404).json({ error: 'Không tìm thấy phiên hóa đơn.' });
       const imageCount = await pool.query('SELECT COUNT(*)::int AS count FROM invoicesessionimage WHERE invoice_session_id = $1', [session.invoice_session_id]);
       if (!imageCount.rows[0].count) return res.status(400).json({ error: 'Phiên chưa có ảnh.' });
+      if (session.source_mode === 'BATCH' && ['FAILED', 'RETRY_WAIT'].includes(session.status)) {
+        await pool.query(`UPDATE invoicesession SET status='QUEUED', queue_attempts=0, route_index=0,
+          prompt_version=$1, next_attempt_at=NOW(), error_message=NULL, processing_started_at=NULL, updated_at=NOW()
+          WHERE invoice_session_id=$2`,
+        [String(process.env.GEMINI_PROMPT_VERSION || 'compact').toLowerCase() === 'detailed' ? 'detailed' : 'compact', session.invoice_session_id]);
+        return res.status(202).json({ status: 'QUEUED' });
+      }
       if (!['READY_TO_PROCESS', 'FAILED'].includes(session.status)) return res.status(409).json({ error: 'Phiên đang xử lý hoặc đã hoàn tất.' });
       const updated = await pool.query(
         "UPDATE invoicesession SET status = 'PROCESSING', error_message = NULL, updated_at = NOW() WHERE invoice_session_id = $1 AND status IN ('READY_TO_PROCESS', 'FAILED') RETURNING *",

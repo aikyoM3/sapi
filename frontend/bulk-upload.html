@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Upload ảnh hàng loạt - SAPI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
+    <style>
+      .bulk-banner{border:1px solid var(--tblr-primary);background:var(--tblr-primary-lt);border-radius:.5rem}
+      .capture-zone{display:block;border:2px dashed var(--tblr-border-color);border-radius:.75rem;padding:2rem;text-align:center;cursor:pointer;background:var(--tblr-bg-surface-secondary)}
+      .capture-zone:hover{border-color:var(--tblr-primary);background:var(--tblr-primary-lt)}
+      .preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem}
+      .preview-card img{width:100%;height:210px;object-fit:contain;background:#f1f3f5}
+    </style>
+  </head>
+  <body><div class="page">
+    <header class="navbar navbar-expand-md"><div class="container-xl"><a class="navbar-brand fw-bold fs-2 text-primary" href="./index.html">SAPI</a></div></header>
+    <div class="page-wrapper">
+      <div class="page-header"><div class="container-xl"><div class="row align-items-center"><div class="col"><div class="text-primary fw-bold mb-1">CHẾ ĐỘ HÀNG LOẠT</div><h2 class="page-title">Chụp hoặc chọn nhiều hóa đơn</h2></div><div class="col-auto"><a class="btn btn-outline-secondary" href="./index.html">Quay lại</a></div></div></div></div>
+      <div class="page-body"><div class="container-xl">
+        <div class="bulk-banner p-3 mb-4"><strong>Mỗi ảnh tương ứng với một hóa đơn riêng.</strong><div class="text-secondary mt-1">Sau khi xác nhận, bạn có thể quay lại danh sách ngay. SAPI sẽ xử lý lần lượt ở chế độ nền và cập nhật trạng thái của từng hóa đơn.</div></div>
+        <div class="card"><div class="card-body">
+          <input id="bulk-images" class="d-none" type="file" accept="image/jpeg,image/png,image/webp" multiple />
+          <label class="capture-zone" for="bulk-images"><div class="fs-1 mb-2">📷</div><div class="h3 mb-1">Chụp ảnh hoặc chọn từ thiết bị</div><div class="text-secondary">Tối đa 20 ảnh, mỗi ảnh không quá 10 MB</div></label>
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mt-4"><div id="selection-count" class="text-secondary">Chưa chọn ảnh.</div><div class="btn-list"><button id="choose-more" class="btn btn-outline-primary" type="button">Thêm ảnh</button><button id="submit-batch" class="btn btn-primary" type="button" disabled>Tạo phiên xử lý</button></div></div>
+          <div id="bulk-preview" class="preview-grid mt-4"></div>
+          <div id="bulk-status" class="alert alert-info mt-4 mb-0 d-none" role="status"></div>
+        </div></div>
+      </div></div>
+    </div>
+  </div>
+  <script src="./app.js"></script>
+  <script>
+    const input = document.querySelector('#bulk-images');
+    const preview = document.querySelector('#bulk-preview');
+    const submit = document.querySelector('#submit-batch');
+    const statusBox = document.querySelector('#bulk-status');
+    let files = [];
+    const showStatus = (message, type = 'info') => { statusBox.className = `alert alert-${type} mt-4 mb-0`; statusBox.textContent = message; };
+    function render() {
+      preview.replaceChildren();
+      files.forEach((file, index) => {
+        const card = document.createElement('div'); card.className = 'card preview-card';
+        const image = document.createElement('img'); image.src = URL.createObjectURL(file); image.alt = `Hóa đơn ${index + 1}`; image.onload = () => URL.revokeObjectURL(image.src);
+        const body = document.createElement('div'); body.className = 'card-body p-2';
+        const title = document.createElement('strong'); title.className = 'd-block'; title.textContent = `Hóa đơn ${index + 1}`;
+        const name = document.createElement('div'); name.className = 'small text-secondary text-truncate'; name.textContent = file.name;
+        const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-sm btn-outline-danger mt-2 w-100'; remove.textContent = 'Bỏ ảnh'; remove.addEventListener('click', () => { files.splice(index, 1); render(); });
+        body.append(title, name, remove); card.append(image, body); preview.append(card);
+      });
+      document.querySelector('#selection-count').textContent = files.length ? `${files.length} ảnh sẽ tạo ${files.length} phiên hóa đơn riêng.` : 'Chưa chọn ảnh.';
+      submit.disabled = !files.length;
+    }
+    input.addEventListener('change', () => {
+      const additions = [...input.files];
+      if (files.length + additions.length > 20) { showStatus('Mỗi lần chỉ hỗ trợ tối đa 20 ảnh.', 'warning'); input.value = ''; return; }
+      files.push(...additions); input.value = ''; render();
+    });
+    document.querySelector('#choose-more').addEventListener('click', () => input.click());
+    submit.addEventListener('click', async () => {
+      if (!files.length || submit.disabled) return;
+      submit.disabled = true; submit.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang tạo hàng đợi…';
+      showStatus(`Đang upload ${files.length} ảnh và tạo các phiên xử lý…`);
+      try {
+        const form = new FormData(); files.forEach((file) => form.append('invoiceImages', file));
+        const response = await fetch('/api/invoice-sessions/bulk', { method: 'POST', body: form });
+        if (response.status === 401) return location.replace('/login.html');
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Không thể tạo phiên hàng loạt.');
+        sessionStorage.setItem('sapi.bulkNotice', `Đã đưa ${result.count} hóa đơn vào hàng đợi xử lý.`);
+        location.replace('/index.html');
+      } catch (error) {
+        showStatus(error.message, 'danger'); submit.disabled = false; submit.textContent = 'Tạo phiên xử lý';
+      }
+    });
+    render();
+  </script>
+  </body>
+</html>

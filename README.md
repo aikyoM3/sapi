@@ -57,6 +57,14 @@ Do this on a clean machine (or after cloning the repo). One Node process serves 
 
 Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, stop the old Node process or change `PORT` in `backend/.env`.
 
+### Upload ảnh hàng loạt
+
+- Trên trang **Nhập hàng**, chọn **Upload ảnh hàng loạt**. Trong phiên bản này, mỗi ảnh tương ứng một hóa đơn riêng; hóa đơn nhiều trang vẫn dùng luồng upload thông thường.
+- Có thể chọn tối đa 20 ảnh. Sau khi bấm **Tạo phiên xử lý**, trình duyệt quay ngay về danh sách và backend xử lý lần lượt từng hóa đơn.
+- Trạng thái được cập nhật theo thứ tự **Chờ xử lý ảnh** → **Đang xử lý ảnh** → **Chờ kiểm tra**. Lỗi tạm thời chuyển sang **Tạm hoãn, sẽ thử lại** để ảnh khác không bị chặn.
+- Khi hoàn tất, chọn **Tiếp tục** để mở trực tiếp màn hình sửa hóa đơn. Chế độ hàng loạt không tự xác nhận hóa đơn và không tự gửi dữ liệu sang KiotViet.
+- Hàng đợi nằm trong PostgreSQL và được tiếp tục sau khi backend khởi động lại. `INVOICE_OCR_QUEUE_TICK_MS` và `INVOICE_OCR_MAX_ATTEMPTS` lần lượt điều chỉnh chu kỳ kiểm tra và số lần thử tối đa.
+
 **PowerShell:** if `npm start` fails with “running scripts is disabled”, use `npm.cmd start` (and `npm.cmd install`) instead of `npm`. Run those commands inside `backend`, not the project root.
 
 **After any change to `backend/.env` you must restart the server.** `dotenv` only reads the file at process start. Ctrl+C, then `npm.cmd start` again. Filling the key while Node is already running has no effect.

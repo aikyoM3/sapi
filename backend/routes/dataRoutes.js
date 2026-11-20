@@ -21,16 +21,21 @@ module.exports = function dataRoutes(pool) {
       const { rows } = await pool.query(`
         WITH invoice_rows AS (
         SELECT pi.invoice_id, pi.invoice_number, s.supplier_name, pi.invoice_date,
-               pi.total_amount, pi.discount_amount, pi.status, NULL::text AS session_token, NULL::text AS session_status
+               pi.total_amount, pi.discount_amount, pi.status, NULL::text AS session_token, NULL::text AS session_status,
+               NULL::text AS error_message
         FROM purchaseinvoice pi
         LEFT JOIN supplier s ON s.supplier_id = pi.supplier_id AND s.user_id = pi.user_id
         WHERE pi.user_id = $1
         UNION ALL
-        SELECT NULL, ins.ocr_result->'gemini'->'invoice'->>'number',
+        SELECT NULL, COALESCE(ins.ocr_result->'gemini'->'invoice'->>'number', image.original_name, 'Ảnh hóa đơn'),
                ins.ocr_result->'gemini'->'supplier'->>'name',
-               ins.created_at::date, NULL, 0, 'INCOMPLETE', ins.session_token, ins.status
+               ins.created_at::date, NULL, 0, ins.status, ins.session_token, ins.status, ins.error_message
         FROM invoicesession ins
-        WHERE ins.user_id=$1 AND ins.status = 'READY_FOR_REVIEW'
+        LEFT JOIN LATERAL (
+          SELECT original_name FROM invoicesessionimage
+          WHERE invoice_session_id=ins.invoice_session_id ORDER BY page_number LIMIT 1
+        ) image ON TRUE
+        WHERE ins.user_id=$1 AND ins.status IN ('QUEUED','PROCESSING','RETRY_WAIT','READY_FOR_REVIEW','FAILED')
         )
         SELECT * FROM invoice_rows
         WHERE ($2 = '' OR COALESCE(invoice_number,'') ILIKE '%' || $2 || '%'

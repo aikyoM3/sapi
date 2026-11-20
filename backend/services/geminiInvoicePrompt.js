@@ -183,10 +183,15 @@ const invoicePrompts = Object.freeze({
   detailed: detailedInvoiceExtractionPrompt,
 });
 
+function getInvoicePrompt(version) {
+  const selected = String(version || '').trim().toLowerCase();
+  if (!invoicePrompts[selected]) throw new Error(`Phiên bản prompt không hợp lệ: ${selected}`);
+  return { version: selected, text: invoicePrompts[selected] };
+}
+
 function getInvoicePromptPlan() {
   const primaryVersion = String(process.env.GEMINI_PROMPT_VERSION || 'compact').trim().toLowerCase();
-  if (!invoicePrompts[primaryVersion]) throw new Error(`Phiên bản prompt không hợp lệ: ${primaryVersion}`);
-  const plan = [{ version: primaryVersion, text: invoicePrompts[primaryVersion] }];
+  const plan = [getInvoicePrompt(primaryVersion)];
   if (process.env.GEMINI_PROMPT_FALLBACK_ON_INVALID !== 'false' && primaryVersion !== 'detailed') {
     plan.push({ version: 'detailed', text: invoicePrompts.detailed });
   }
@@ -199,5 +204,6 @@ module.exports = {
   invoiceExtractionPrompt,
   compactInvoiceExtractionPrompt,
   detailedInvoiceExtractionPrompt,
+  getInvoicePrompt,
   getInvoicePromptPlan,
 };

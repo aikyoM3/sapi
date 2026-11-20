@@ -1,5 +1,5 @@
 const { createGeminiClient, getGeminiEndpointSettings, redactGeminiSecrets } = require('./geminiClient');
-const { invoiceExtractionPrompt, getInvoicePromptPlan } = require('./geminiInvoicePrompt');
+const { invoiceExtractionPrompt, getInvoicePrompt, getInvoicePromptPlan } = require('./geminiInvoicePrompt');
 
 // This is the application's standardized Gemini response. Do not rename fields without a migration.
 const invoiceSchema = {
@@ -99,10 +99,10 @@ const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mill
 const retryableGeminiError = (error) => [429, 500, 502, 503].includes(Number(error?.status || error?.statusCode));
 const MAX_ATTEMPTS_PER_MODEL = 2;
 
-async function generateWithRetry(ai, models, request, attempts, provider, promptVersion) {
+async function generateWithRetry(ai, models, request, attempts, provider, promptVersion, maxAttempts = MAX_ATTEMPTS_PER_MODEL) {
   let lastError;
   for (const model of [...new Set(models.filter(Boolean))]) {
-    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const started = Date.now();
       try {
         const response = await ai.models.generateContent({ model, ...request });
@@ -112,7 +112,7 @@ async function generateWithRetry(ai, models, request, attempts, provider, prompt
       catch (error) {
         attempts.push({ provider: provider.provider, base_url: provider.baseUrl, prompt_version: promptVersion, model, attempt: attempt + 1, elapsed_ms: Date.now() - started, status: 'error', http_status: Number(error?.status || error?.statusCode) || null, error: redactSecrets(error?.message, provider.apiKey) });
         lastError = error;
-        if (!retryableGeminiError(error) || attempt === MAX_ATTEMPTS_PER_MODEL - 1) break;
+        if (!retryableGeminiError(error) || attempt === maxAttempts - 1) break;
         await wait(1000 * (attempt + 1));
       }
     }
@@ -128,12 +128,12 @@ function providerFailoverError(error) {
     || /abort|timeout|timed out|fetch failed/i.test(error?.message || '');
 }
 
-async function generateAcrossProviders(providers, models, request, attempts, promptVersion, timeoutMs) {
+async function generateAcrossProviders(providers, models, request, attempts, promptVersion, timeoutMs, maxAttempts) {
   let lastError;
   for (const provider of providers) {
     const ai = createGeminiClient(provider.apiKey, { timeoutMs, baseUrl: provider.baseUrl });
     try {
-      const generated = await generateWithRetry(ai, models, request, attempts, provider, promptVersion);
+      const generated = await generateWithRetry(ai, models, request, attempts, provider, promptVersion, maxAttempts);
       return { ...generated, provider };
     } catch (error) {
       lastError = error;
@@ -266,17 +266,24 @@ async function extractInvoiceFromImagesDetailed(files, options = {}) {
   }
 
   const configured = config(options.connection?.apiKey || options.apiKey, options.connection);
-  const providers = configured.providers;
-  const models = [configured.model, configured.fallbackModel];
+  let providers = configured.providers;
+  let models = [configured.model, configured.fallbackModel];
   const { timeoutMs, temperature } = configured;
-  const diagnostics = { attempts: [], model_used: null, model_version: null, provider_used: null, base_url_used: null, prompt_used: null, prompt_failures: [], raw_text: null, raw_json: null };
+  const routes = providers.flatMap((provider) => [...new Set(models.filter(Boolean))].map((model) => ({ provider, model })));
+  const requestedRoute = Number.isInteger(Number(options.routeIndex)) ? Math.max(0, Number(options.routeIndex)) : 0;
+  const selectedRouteIndex = routes.length ? requestedRoute % routes.length : 0;
+  if (options.singleRoute && routes[selectedRouteIndex]) {
+    providers = [routes[selectedRouteIndex].provider];
+    models = [routes[selectedRouteIndex].model];
+  }
+  const diagnostics = { attempts: [], route_index: selectedRouteIndex, route_count: routes.length, model_used: null, model_version: null, provider_used: null, base_url_used: null, prompt_used: null, prompt_failures: [], raw_text: null, raw_json: null };
   try {
     const commonParts = [
       { text: `Có ${files.length} ảnh theo đúng thứ tự trang của CÙNG MỘT hóa đơn. Hãy gộp tất cả các trang thành một JSON duy nhất.` },
       ...files.map((file) => ({ inlineData: { mimeType: file.mimetype, data: file.buffer.toString('base64') } })),
       ...(buildBuyerContext(options.buyer) ? [{ text: buildBuyerContext(options.buyer) }] : []),
     ];
-    const promptPlan = getInvoicePromptPlan();
+    const promptPlan = options.promptVersion ? [getInvoicePrompt(options.promptVersion)] : getInvoicePromptPlan();
     let preferredFallbackProvider = null;
     let preferredFallbackModels = null;
     for (let promptIndex = 0; promptIndex < promptPlan.length; promptIndex += 1) {
@@ -288,7 +295,7 @@ async function extractInvoiceFromImagesDetailed(files, options = {}) {
       const generated = await generateAcrossProviders(orderedProviders, orderedModels, {
         contents: [{ role: 'user', parts: [...commonParts, { text: prompt.text }] }],
         config: { temperature, responseMimeType: 'application/json', responseJsonSchema: invoiceSchema, httpOptions: { timeout: timeoutMs } },
-      }, diagnostics.attempts, prompt.version, timeoutMs);
+      }, diagnostics.attempts, prompt.version, timeoutMs, options.singleRoute ? 1 : MAX_ATTEMPTS_PER_MODEL);
       const { response } = generated;
       diagnostics.model_used = generated.model;
       diagnostics.model_version = response.modelVersion || null;
