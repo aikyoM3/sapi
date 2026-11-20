@@ -1,3 +1,58 @@
+// Small shared UI helpers. No Bootstrap/Tabler JavaScript dependency is required.
+window.SapiUI = (() => {
+  const fontSizes = { small: '14px', default: '16px', large: '18px' };
+  const fontKey = 'sapi.fontSize';
+  const style = document.createElement('style');
+  style.textContent = `
+    .sapi-toasts{position:fixed;top:1rem;right:1rem;z-index:1100;width:min(24rem,calc(100vw - 2rem));pointer-events:none}
+    .sapi-toasts .alert{pointer-events:auto;box-shadow:0 .25rem 1rem #0002;overflow-wrap:anywhere}
+    .sapi-confirm{width:min(30rem,calc(100vw - 2rem));max-height:90vh;overflow:auto;border:1px solid var(--tblr-border-color,#ddd);border-radius:.5rem;padding:0;color:var(--tblr-body-color,#182433);background:var(--tblr-bg-surface,#fff)}
+    .sapi-confirm::backdrop{background:#0008}
+    .sapi-confirm .card-body{padding:1.25rem}.sapi-confirm .card-footer{padding:1rem}
+    .sapi-confirm button{min-height:2.5rem}
+  `;
+  document.head.append(style);
+  function savedFontSize() { try { return localStorage.getItem(fontKey) || 'default'; } catch { return 'default'; } }
+  function setFontSize(value, persist = true) {
+    const size = Object.hasOwn(fontSizes, value) ? value : 'default';
+    document.documentElement.style.fontSize = fontSizes[size];
+    document.documentElement.dataset.fontSize = size;
+    if (persist) { try { localStorage.setItem(fontKey, size); } catch { return false; } }
+    return true;
+  }
+  setFontSize(savedFontSize(), false);
+  window.addEventListener('storage', (event) => { if (event.key === fontKey || event.key === null) setFontSize(savedFontSize(), false); });
+  function notify(message, type = 'success', duration = type === 'danger' ? 0 : 6000) {
+    let region = document.querySelector('#sapi-toasts');
+    if (!region) { region = document.createElement('div'); region.id = 'sapi-toasts'; region.className = 'sapi-toasts'; region.setAttribute('aria-live', 'polite'); document.body.append(region); }
+    const toast = document.createElement('div'); toast.className = `alert alert-${['success','danger','warning','info'].includes(type) ? type : 'info'} d-flex gap-3 align-items-start`;
+    toast.setAttribute('role', type === 'danger' ? 'alert' : 'status');
+    const content = document.createElement('span'); content.className = 'flex-fill'; content.textContent = message;
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn-close'; close.setAttribute('aria-label', 'Đóng thông báo');
+    let timer; const dismiss = () => { clearTimeout(timer); toast.remove(); }; close.addEventListener('click', dismiss);
+    toast.append(content, close); region.append(toast);
+    const startTimer = () => { clearTimeout(timer); if (duration > 0) timer = setTimeout(dismiss, duration); };
+    toast.addEventListener('mouseenter', () => clearTimeout(timer)); toast.addEventListener('mouseleave', startTimer);
+    toast.addEventListener('focusin', () => clearTimeout(timer)); toast.addEventListener('focusout', startTimer); startTimer();
+  }
+  let confirmationOpen = false;
+  function confirmAction(message, { title = 'Xác nhận thao tác', confirmLabel = 'Xác nhận' } = {}) {
+    if (confirmationOpen) return Promise.resolve(false);
+    confirmationOpen = true;
+    return new Promise((resolve) => {
+      const opener = document.activeElement;
+      const dialog = document.createElement('dialog'); dialog.className = 'sapi-confirm'; dialog.setAttribute('aria-labelledby', 'sapi-confirm-title'); dialog.setAttribute('aria-describedby', 'sapi-confirm-message');
+      dialog.innerHTML = '<div class="card-body"><h3 id="sapi-confirm-title"></h3><p id="sapi-confirm-message" class="mb-0"></p></div><div class="card-footer d-flex justify-content-end gap-2"><button type="button" class="btn" data-dismiss autofocus>Quay lại</button><button type="button" class="btn btn-danger" data-accept></button></div>';
+      dialog.querySelector('h3').textContent = title; dialog.querySelector('p').textContent = message; dialog.querySelector('[data-accept]').textContent = confirmLabel;
+      dialog.querySelector('[data-dismiss]').addEventListener('click', () => dialog.close('cancel'));
+      dialog.querySelector('[data-accept]').addEventListener('click', () => dialog.close('confirmed'));
+      dialog.addEventListener('close', () => { const confirmed = dialog.returnValue === 'confirmed'; dialog.remove(); confirmationOpen = false; if (opener?.isConnected) opener.focus(); resolve(confirmed); }, { once: true });
+      document.body.append(dialog); dialog.showModal();
+    });
+  }
+  return { notify, confirmAction, setFontSize };
+})();
+
 const pageConfigs = {
   invoices: {
     endpoint: '/api/invoices',
@@ -146,7 +201,7 @@ async function handleTableAction(event) {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const action = button.dataset.action;
   if (action === 'edit-record') { openEditModal(button.dataset.type, button.dataset.id); return; }
-  if (action.startsWith('cancel') && !window.confirm('Bạn có chắc muốn hủy dữ liệu này?')) return;
+  if (action.startsWith('cancel') && !await SapiUI.confirmAction('Hủy hóa đơn này? Dữ liệu của hóa đơn hoặc phiên nhập chưa hoàn tất sẽ bị xóa.', { title: 'Hủy hóa đơn', confirmLabel: 'Hủy hóa đơn' })) return;
   const feedback = document.querySelector('#table-feedback'); const original = button.textContent; button.disabled = true;
   if (action === 'sync-invoice') button.textContent = 'Đang đồng bộ…';
   try {
@@ -154,7 +209,7 @@ async function handleTableAction(event) {
     const response = await fetch(url, { method: action === 'sync-invoice' ? 'POST' : 'DELETE' });
     const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || 'Không thể thực hiện thao tác.');
-    if (feedback) { feedback.className = 'alert alert-success mb-2'; feedback.textContent = action === 'sync-invoice' ? '✓ Đồng bộ hóa đơn thành công.' : 'Đã hủy.'; }
+    SapiUI.notify(action === 'sync-invoice' ? 'Đồng bộ hóa đơn thành công.' : 'Đã hủy hóa đơn.');
     await loadTable('invoices');
   } catch (error) {
     if (feedback) { feedback.className = 'alert alert-danger mb-2'; feedback.textContent = error.message; }
@@ -178,8 +233,11 @@ function openEditModal(type, id) {
 
 async function saveEditedRecord(event) {
   event.preventDefault(); const form = event.currentTarget; const config = editConfigs[form.dataset.type]; const button = document.querySelector('#edit-record-save'); button.disabled = true; button.textContent = 'Đang lưu…';
-  try { const body = Object.fromEntries(new FormData(form).entries()); await jsonRequest(`${config.endpoint}/${form.dataset.id}`, { method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body) }); toggleModal('edit-record-modal', false); await loadTable(loadedTableName); }
-  catch(error){ alert(error.message); } finally { button.disabled=false; button.textContent='Lưu'; }
+  let feedback = document.querySelector('#edit-record-feedback');
+  if (!feedback) { feedback = document.createElement('div'); feedback.id = 'edit-record-feedback'; form.querySelector('.modal-body').append(feedback); }
+  feedback.textContent = '';
+  try { const body = Object.fromEntries(new FormData(form).entries()); await jsonRequest(`${config.endpoint}/${form.dataset.id}`, { method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body) }); toggleModal('edit-record-modal', false); await loadTable(loadedTableName); SapiUI.notify('Đã lưu dữ liệu đối chiếu.'); }
+  catch(error){ feedback.className = 'alert alert-danger'; feedback.setAttribute('role','alert'); feedback.textContent = error.message; } finally { button.disabled=false; button.textContent='Lưu'; }
 }
 
 async function jsonRequest(url, options = {}) {
@@ -190,9 +248,50 @@ async function jsonRequest(url, options = {}) {
   return payload;
 }
 
+const modalOpeners = new WeakMap();
 function toggleModal(id, show) {
   const modal = document.querySelector(`#${id}`); const backdrop = document.querySelector(`#${id}-backdrop`); if (!modal) return;
+  if (show) modalOpeners.set(modal, document.activeElement);
   modal.classList.toggle('d-none', !show); modal.style.display = show ? 'block' : 'none'; modal.setAttribute('aria-hidden', String(!show)); backdrop?.classList.toggle('d-none', !show);
+  modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.tabIndex = -1;
+  const title = modal.querySelector('.modal-title'); if (title) { title.id ||= `${id}-title`; modal.setAttribute('aria-labelledby', title.id); }
+  if (show) (modal.querySelector('input:not([disabled]),select,button') || modal).focus();
+  else {
+    if (id === 'settings-modal') { document.querySelector('#password-form')?.reset(); const message = document.querySelector('#password-message'); if (message) { message.replaceChildren(); message.className = ''; } }
+    modalOpeners.get(modal)?.focus();
+  }
+}
+
+document.addEventListener('keydown', (event) => {
+  if (document.querySelector('dialog[open]')) return;
+  const modal = [...document.querySelectorAll('.modal[aria-hidden="false"]')].at(-1); if (!modal) return;
+  if (event.key === 'Escape') { event.preventDefault(); toggleModal(modal.id, false); }
+  if (event.key === 'Tab') {
+    const controls = [...modal.querySelectorAll('button,input,select,textarea,a[href],[tabindex="0"]')].filter((element) => !element.disabled && element.getClientRects().length);
+    if (!controls.length) { event.preventDefault(); modal.focus(); return; }
+    if (event.shiftKey && (document.activeElement === controls[0] || !modal.contains(document.activeElement))) { event.preventDefault(); controls.at(-1).focus(); }
+    else if (!event.shiftKey && (document.activeElement === controls.at(-1) || !modal.contains(document.activeElement))) { event.preventDefault(); controls[0].focus(); }
+  }
+});
+
+function initializeSettings() {
+  document.querySelector('#settings-modal .modal-dialog').classList.add('modal-dialog-scrollable');
+  const body = document.querySelector('#settings-modal .modal-body');
+  body.classList.remove('text-secondary');
+  body.innerHTML = `<section aria-labelledby="display-settings"><h4 id="display-settings">Hiển thị</h4><label class="form-label" for="font-size">Cỡ chữ</label><div class="d-flex gap-2"><select id="font-size" class="form-select"><option value="small">Nhỏ</option><option value="default">Mặc định</option><option value="large">Lớn</option></select><button id="reset-font-size" type="button" class="btn">Mặc định</button></div><p class="form-hint mt-2">Áp dụng ngay và lưu trên trình duyệt này.</p></section><hr><section aria-labelledby="password-settings"><h4 id="password-settings">Đổi mật khẩu</h4><form id="password-form"><label class="form-label" for="current-password">Mật khẩu hiện tại</label><input id="current-password" name="currentPassword" class="form-control mb-3" type="password" autocomplete="current-password" required><label class="form-label" for="new-password">Mật khẩu mới</label><input id="new-password" name="newPassword" class="form-control mb-3" type="password" autocomplete="new-password" minlength="8" required><label class="form-label" for="confirm-password">Xác nhận mật khẩu mới</label><input id="confirm-password" name="confirmPassword" class="form-control" type="password" autocomplete="new-password" minlength="8" required><p class="form-hint mt-2">Ít nhất 8 ký tự, tối đa 72 byte. Sau khi đổi, các phiên khác sẽ đăng xuất; phiên này được giữ.</p><div id="password-message" aria-live="polite"></div><button id="save-password" type="submit" class="btn btn-primary">Đổi mật khẩu</button></form></section>`;
+  const select = document.querySelector('#font-size'); select.value = document.documentElement.dataset.fontSize;
+  function updateFont(value) { select.value = value; if (!SapiUI.setFontSize(value)) SapiUI.notify('Đã đổi cỡ chữ nhưng trình duyệt không cho lưu lựa chọn.', 'warning'); }
+  select.addEventListener('change', () => updateFont(select.value));
+  document.querySelector('#reset-font-size').addEventListener('click', () => updateFont('default'));
+  document.querySelector('#password-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); const form = event.currentTarget; const button = document.querySelector('#save-password'); const message = document.querySelector('#password-message');
+    const data = Object.fromEntries(new FormData(form)); message.textContent = '';
+    if (data.newPassword !== data.confirmPassword) { message.className = 'alert alert-danger'; message.textContent = 'Xác nhận mật khẩu mới không trùng khớp.'; return; }
+    button.disabled = true; button.textContent = 'Đang đổi mật khẩu…';
+    try { const result = await jsonRequest('/api/auth/password', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); form.reset(); message.className = 'alert alert-success'; message.textContent = result.message; SapiUI.notify('Đã đổi mật khẩu.'); }
+    catch (error) { message.className = 'alert alert-danger'; message.textContent = error.message; }
+    finally { button.disabled = false; button.textContent = 'Đổi mật khẩu'; }
+  });
 }
 
 async function initializeSharedNavigation() {
@@ -210,9 +309,24 @@ async function initializeSharedNavigation() {
     <div class="d-flex justify-content-between"><h3>3. Gemini API</h3><button id="gemini-edit" class="btn btn-sm">Sửa</button></div><div id="gemini-view"><div id="gemini-status" class="small mb-2"></div></div><div id="gemini-form"><label class="form-label" for="gemini-api-key">Gemini API Key</label><input id="gemini-api-key" class="form-control" type="password" autocomplete="new-password" placeholder="Nhập key mới; key đã lưu không được hiển thị"><label id="gemini-dev-wrap" class="form-check mt-2 d-none"><input id="gemini-use-dev" class="gemini-api-key form-check-input" type="checkbox"><span class="form-check-label">Dùng key development</span></label><a class="small d-block mt-2" href="/huong-dan-ket-noi-gemini" target="_blank" rel="noopener">Cách lấy Gemini API Key ↗</a><div class="btn-list mt-3"><button id="gemini-cancel" class="btn btn-sm">Hủy</button><button id="gemini-connect" class="btn btn-sm btn-primary">Kiểm tra và lưu API Key</button></div></div><div id="gemini-message" class="small mt-2" style="white-space:pre-line"></div>
   </div><div class="modal-footer"><button class="btn" data-close-modal="connections-modal">Đóng</button></div></div></div></div>`);
 
+  document.querySelector('#gemini-dev-wrap').insertAdjacentHTML('afterend', `
+    <div class="mt-3 mb-2"><label class="form-label" for="gemini-host">API host</label>
+    <input id="gemini-host" type="url" class="form-control" value="https://generativelanguage.googleapis.com">
+    <div id="gemini-host-help" class="form-hint">Mặc định Google AI Studio. Có thể dùng host tương thích Gemini API.</div></div>`);
   let connectionState = { kiot: {}, gemini: {} }; let currentProfile = {};
+  function updateGeminiSource() {
+    const development = document.querySelector('#gemini-use-dev').checked;
+    const settings = connectionState.gemini;
+    document.querySelector('#gemini-api-key').disabled = development;
+    const host = document.querySelector('#gemini-host');
+    host.disabled = development;
+    host.value = settings.source === 'stored' ? settings.baseUrl || 'https://generativelanguage.googleapis.com' : 'https://generativelanguage.googleapis.com';
+    document.querySelector('#gemini-host-help').textContent = development
+      ? 'Đang dùng cấu hình development riêng trên server. Key và host trong form này không được sử dụng.'
+      : 'Mặc định Google AI Studio. Host HTTPS gốc, không thêm /v1; host khác phải tương thích Gemini API và được quản trị viên cho phép.';
+  }
   const formatConnectionDate = (value) => value ? new Intl.DateTimeFormat('vi-VN', { dateStyle:'short', timeStyle:'short' }).format(new Date(value)) : 'Chưa có';
-  const showMessage = (id, message, success = false) => { const target=document.querySelector(id); target.className=`small mt-2 text-${success?'success':'danger'}`; target.textContent=message; };
+  const showMessage = (id, message, success = false) => { const target=document.querySelector(id); target.className=`small mt-2 text-${success?'success':'danger'}`; target.setAttribute('role', success ? 'status' : 'alert'); target.textContent=message; if (success) SapiUI.notify(message); };
   function setSectionMode(section, editing, configured) {
     document.querySelector(`#${section}-view`).classList.toggle('d-none', editing || !configured);
     document.querySelector(`#${section}-form`).classList.toggle('d-none', !editing && configured);
@@ -242,11 +356,11 @@ async function initializeSharedNavigation() {
     document.querySelector('#sync-interval').value = schedule.intervalMinutes || 60;
     document.querySelector('#sync-schedule').classList.toggle('d-none', !kiot.connected);
     document.querySelector('#sync-schedule-status').textContent = schedule.enabled ? `Lần chạy kế tiếp: ${formatConnectionDate(schedule.nextSyncAt)}${schedule.lastError ? ` · Lỗi gần nhất: ${schedule.lastError}` : ''}` : 'Đang tắt. Đồng bộ vẫn có thể thực hiện thủ công.';
-    document.querySelector('#gemini-status').textContent = gemini.connected ? `● Đã cấu hình${gemini.source==='development'?' bằng API development':''}` : '● Chưa cấu hình';
+    document.querySelector('#gemini-status').textContent = gemini.connected ? gemini.source==='development' ? '● Đã cấu hình bằng key development' : `● Đã cấu hình bằng key riêng · ${gemini.baseUrl}` : gemini.error || '● Chưa cấu hình';
     document.querySelector('#gemini-status').className = `small mb-2 text-${gemini.connected?'success':'secondary'}`;
     document.querySelector('#gemini-dev-wrap').classList.toggle('d-none', !gemini.devCredentialsAvailable);
     document.querySelector('#gemini-use-dev').checked = gemini.source === 'development';
-    document.querySelector('#gemini-api-key').disabled = gemini.source === 'development';
+    updateGeminiSource();
     setSectionMode('kiot', false, kiot.connected); setSectionMode('gemini', false, gemini.connected);
   }
   async function openInformationModal() {
@@ -255,12 +369,12 @@ async function initializeSharedNavigation() {
     document.querySelector('#store-message').textContent=''; document.querySelector('#kiot-message').textContent=''; document.querySelector('#gemini-message').textContent='';
     await refreshConnections(); toggleModal('connections-modal', true);
   }
-  await refreshConnections();
-  document.addEventListener('sapi:connections-changed', refreshConnections);
-  document.querySelector('[data-logout]').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); location.replace('/login.html'); });
+  initializeSettings();
+  document.addEventListener('sapi:connections-changed', () => refreshConnections().catch((error) => SapiUI.notify(error.message, 'danger')));
+  document.querySelector('[data-logout]').addEventListener('click', async () => { try { await jsonRequest('/api/auth/logout', { method: 'POST' }); location.replace('/login.html'); } catch (error) { SapiUI.notify(error.message, 'danger'); } });
   document.querySelector('#settings-icon').addEventListener('click', () => toggleModal('settings-modal', true));
-  document.querySelector('#edit-connections').addEventListener('click', () => openInformationModal().catch((error) => alert(error.message)));
-  document.querySelectorAll('[data-close-modal]').forEach((button) => button.addEventListener('click', () => toggleModal(button.dataset.closeModal, false)));
+  document.querySelector('#edit-connections').addEventListener('click', () => openInformationModal().catch((error) => SapiUI.notify(error.message, 'danger')));
+  document.querySelectorAll('[data-close-modal]').forEach((button) => { button.setAttribute('aria-label', 'Đóng'); button.addEventListener('click', () => toggleModal(button.dataset.closeModal, false)); });
   document.querySelector('#store-edit').addEventListener('click',()=>setSectionMode('store',true,true));
   document.querySelector('#store-cancel').addEventListener('click',()=>renderStoreProfile(currentProfile));
   document.querySelector('#store-save').addEventListener('click', async () => {
@@ -270,7 +384,7 @@ async function initializeSharedNavigation() {
   });
   document.querySelector('#navbar-sync').addEventListener('click', async () => {
     const button = document.querySelector('#navbar-sync'); const feedback = document.querySelector('#navbar-feedback'); button.disabled=true; button.textContent='Đang đồng bộ...'; feedback.textContent='';
-    try { await jsonRequest('/api/integrations/kiotviet/sync',{method:'POST'}); feedback.className='small text-end mt-1 text-success'; feedback.textContent='✓ Đồng bộ thành công'; await refreshConnections(); }
+    try { await jsonRequest('/api/integrations/kiotviet/sync',{method:'POST'}); feedback.className='small text-end mt-1 text-success'; feedback.textContent='✓ Đồng bộ thành công'; SapiUI.notify('Đồng bộ danh mục KiotViet thành công.'); await refreshConnections(); }
     catch(error){ feedback.className='small text-end mt-1 text-danger'; feedback.textContent=error.message; }
     finally{ button.disabled=false; button.textContent='Đồng bộ ngay'; }
   });
@@ -283,16 +397,20 @@ async function initializeSharedNavigation() {
     catch(error){showMessage('#kiot-message',error.message)} finally{button.disabled=false;button.textContent='Kết nối / Cập nhật'}
   });
   document.querySelector('#kiot-check').addEventListener('click', async () => { try{await jsonRequest('/api/integrations/kiotviet/check',{method:'POST'});showMessage('#kiot-message','✓ Kết nối KiotViet đang hoạt động.',true);await refreshConnections()}catch(error){showMessage('#kiot-message',error.message)} });
-  document.querySelector('#kiot-disconnect').addEventListener('click', async () => { if(!confirm('Ngắt kết nối KiotViet?'))return;try{await jsonRequest('/api/integrations/kiotviet/disconnect',{method:'POST'});showMessage('#kiot-message','Đã ngắt kết nối KiotViet.',true);await refreshConnections()}catch(error){showMessage('#kiot-message',error.message)} });
+  document.querySelector('#kiot-disconnect').addEventListener('click', async () => { if(!await SapiUI.confirmAction('SAPI sẽ không thể đồng bộ danh mục hoặc gửi phiếu nhập cho đến khi bạn kết nối lại.', { title: 'Ngắt kết nối KiotViet', confirmLabel: 'Ngắt kết nối' }))return;try{await jsonRequest('/api/integrations/kiotviet/disconnect',{method:'POST'});showMessage('#kiot-message','Đã ngắt kết nối KiotViet.',true);await refreshConnections()}catch(error){showMessage('#kiot-message',error.message)} });
   document.querySelector('#sync-schedule-save').addEventListener('click', async () => { const button=document.querySelector('#sync-schedule-save'); button.disabled=true; try { await jsonRequest('/api/integrations/kiotviet/schedule',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:document.querySelector('#sync-enabled').checked,intervalMinutes:Number(document.querySelector('#sync-interval').value)})}); await refreshConnections(); } catch(error) { document.querySelector('#sync-schedule-status').textContent=error.message; } finally { button.disabled=false; } });
-  document.querySelector('#gemini-use-dev').addEventListener('change', (event) => { document.querySelector('#gemini-api-key').disabled=event.target.checked; });
+  document.querySelector('#gemini-use-dev').addEventListener('change', updateGeminiSource);
   document.querySelector('#gemini-edit').addEventListener('click',()=>setSectionMode('gemini',true,true));
-  document.querySelector('#gemini-cancel').addEventListener('click',()=>{document.querySelector('#gemini-api-key').value='';setSectionMode('gemini',false,connectionState.gemini.connected)});
+  document.querySelector('#gemini-cancel').addEventListener('click',()=>{document.querySelector('#gemini-api-key').value='';document.querySelector('#gemini-use-dev').checked=connectionState.gemini.source==='development';updateGeminiSource();setSectionMode('gemini',false,connectionState.gemini.connected)});
   document.querySelector('#gemini-connect').addEventListener('click', async () => {
     const button=document.querySelector('#gemini-connect'); const message=document.querySelector('#gemini-message'); button.disabled=true; button.textContent='Đang kiểm tra...';
-    try { const useDevCredentials=document.querySelector('#gemini-use-dev').checked; await jsonRequest('/api/integrations/gemini/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(useDevCredentials?{useDevCredentials:true}:{apiKey:document.querySelector('#gemini-api-key').value})}); message.className='small mt-2 text-success';message.textContent='✓ Đã lưu Gemini API';document.querySelector('#gemini-api-key').value='';await refreshConnections(); }
+    try { const useDevCredentials=document.querySelector('#gemini-use-dev').checked; await jsonRequest('/api/integrations/gemini/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(useDevCredentials?{useDevCredentials:true}:{apiKey:document.querySelector('#gemini-api-key').value,baseUrl:document.querySelector('#gemini-host').value.trim()})}); message.className='small mt-2 text-success';message.textContent='✓ Đã lưu Gemini API';SapiUI.notify('Đã lưu kết nối Gemini.');document.querySelector('#gemini-api-key').value='';await refreshConnections(); }
     catch(error){message.className='small mt-2 text-danger';message.textContent=error.message}finally{button.disabled=false;button.textContent='Lưu Gemini API'}
   });
+  try { await refreshConnections(); } catch (error) { SapiUI.notify(error.message, 'danger'); }
 }
 
-document.addEventListener('DOMContentLoaded', async () => { try { await initializeSharedNavigation(); } catch (error) { console.warn(error.message); } document.addEventListener('click', handleTableAction); });
+document.addEventListener('DOMContentLoaded', async () => {
+  try { await initializeSharedNavigation(); } catch (error) { console.warn(error.message); }
+  document.addEventListener('click', handleTableAction);
+});

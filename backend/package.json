@@ -8,7 +8,10 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test:kiotviet": "node scripts/test-kiotviet-connection.js",
-    "test:kiotviet:mock": "node scripts/test-kiotviet-mock-purchase-order.js"
+    "test:kiotviet:mock": "node scripts/test-kiotviet-mock-purchase-order.js",
+    "experiment:gemini": "node scripts/gemini-experiment.js",
+    "test:gemini-experiment": "node scripts/test-gemini-experiment.js",
+    "test:gemini-config": "node scripts/test-gemini-config.js"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",

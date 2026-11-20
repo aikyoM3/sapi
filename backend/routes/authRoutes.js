@@ -79,6 +79,36 @@ module.exports = function authRoutes(pool) {
     });
   });
 
+  router.put('/password', requireAuth, async (req, res, next) => {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    // bcrypt only uses the first 72 bytes; reject longer passwords explicitly.
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string'
+      || newPassword.length < 8 || Buffer.byteLength(newPassword, 'utf8') > 72
+      || confirmPassword !== newPassword) {
+      return res.status(400).json({ error: 'Mật khẩu mới cần ít nhất 8 ký tự, tối đa 72 byte và xác nhận phải trùng khớp.' });
+    }
+    if (currentPassword === newPassword) return res.status(400).json({ error: 'Mật khẩu mới phải khác mật khẩu hiện tại.' });
+    const client = await pool.connect().catch(next);
+    if (!client) return;
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query('SELECT password_hash FROM users WHERE user_id=$1 FOR UPDATE', [currentUserId(req)]);
+      if (!rows[0] || !await bcrypt.compare(currentPassword, rows[0].password_hash)) {
+        await client.query('ROLLBACK');
+        // Not 401: the session is still valid; the current-password field is wrong.
+        return res.status(400).json({ error: 'Mật khẩu hiện tại không đúng.' });
+      }
+      const hash = await bcrypt.hash(newPassword, 12);
+      await client.query('UPDATE users SET password_hash=$1, updated_at=NOW() WHERE user_id=$2', [hash, currentUserId(req)]);
+      // Keep this browser logged in; revoke the user's other persisted sessions.
+      await client.query("DELETE FROM user_session WHERE sess->'user'->>'userId'=$1 AND sid<>$2", [String(currentUserId(req)), req.sessionID]);
+      await client.query('COMMIT');
+      res.json({ message: 'Đã đổi mật khẩu. Các phiên đăng nhập khác đã được đăng xuất.' });
+    } catch (error) {
+      await client.query('ROLLBACK'); next(error);
+    } finally { client.release(); }
+  });
+
   router.get('/me', (req, res) => {
     if (!req.session?.user) return res.status(401).json({ error: 'Bạn cần đăng nhập.' });
     res.json({ user: req.session.user });

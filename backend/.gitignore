@@ -1,3 +1,6 @@
 node_modules/
 .env
 temporary_invoice_images/
+/experiments/
+/test_images/
+__pycache__/

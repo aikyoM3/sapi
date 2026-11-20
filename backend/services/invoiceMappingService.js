@@ -17,26 +17,39 @@ function correspondingFromGemini(gemini) {
       name: null,
       quantity: item.quantity,
       unit: item.unit,
-      unit_price: item.unit_price,
+      unit_price: normalizedUnitPrice(item),
       total_price: item.total_price,
     })),
     total_amount: gemini.total_amount,
   };
 }
 
-async function lookupMappedProduct(pool, userId, supplierId, extractedName) {
+function normalizedUnitPrice(item) {
+  const quantity = Number(item.quantity);
+  const total = item.total_price === null || item.total_price === undefined ? NaN : Number(item.total_price);
+  const price = item.unit_price === null || item.unit_price === undefined ? NaN : Number(item.unit_price);
+  if (quantity > 0 && Number.isFinite(total) && total >= 0
+      && (!Number.isFinite(price) || Math.abs(quantity * price - total) > Math.max(0.01, Math.abs(total) * 0.000001))) {
+    return total / quantity;
+  }
+  return item.unit_price;
+}
+
+async function lookupMappedProduct(pool, userId, supplierId, extractedName, extractedUnit) {
   if (!extractedName || !supplierId) return null;
   const { rows } = await pool.query(
     `
-    SELECT p.product_id, p.product_name
+    SELECT p.product_id, p.product_name, p.product_code, p.primary_unit, pm.provider_unit, pm.local_unit
     FROM productmapping pm
     JOIN product p ON p.product_id = pm.local_product_id
     WHERE p.user_id = $1 AND pm.supplier_id = $2
       AND pm.provider_product_name IS NOT NULL AND LOWER(pm.provider_product_name) = LOWER($3)
-    ORDER BY p.product_id
+      AND (LOWER(COALESCE(pm.provider_unit, '')) = LOWER(COALESCE($4, '')) OR pm.provider_unit IS NULL)
+    ORDER BY CASE WHEN LOWER(COALESCE(pm.provider_unit, '')) = LOWER(COALESCE($4, '')) THEN 0
+                  WHEN pm.provider_unit IS NULL THEN 1 ELSE 2 END, p.product_id
     LIMIT 1
     `,
-    [userId, supplierId, extractedName],
+    [userId, supplierId, extractedName, extractedUnit],
   );
   return rows[0] || null;
 }
@@ -71,11 +84,12 @@ async function mapExtractedInvoice(pool, gemini, userId) {
       phone: supplier.phone_number,
       address: supplier.address,
     };
-    for (let index = 0; index < gemini.items.length; index += 1) {
-      const product = await lookupMappedProduct(pool, userId, supplier.supplier_id, gemini.items[index].name);
+    for (let index = 0; supplier && index < gemini.items.length; index += 1) {
+      const product = await lookupMappedProduct(pool, userId, supplier.supplier_id, gemini.items[index].name, gemini.items[index].unit);
       if (product) {
         corresponding.items[index].product_id = product.product_id;
         corresponding.items[index].name = product.product_name;
+        corresponding.items[index].unit = product.local_unit || product.primary_unit || gemini.items[index].unit;
       }
     }
   } catch (error) {

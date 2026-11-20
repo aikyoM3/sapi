@@ -18,7 +18,7 @@ const createDataRoutes = require('./routes/dataRoutes');
 const createInvoiceSessionRoutes = require('./routes/invoiceSessionRoutes');
 const createKiotVietIntegrationRoutes = require('./routes/kiotVietIntegrationRoutes');
 const createGeminiIntegrationRoutes = require('./routes/geminiIntegrationRoutes');
-const { loadGeminiApiKey } = require('./services/geminiConnectionService');
+const { loadGeminiConnection } = require('./services/geminiConnectionService');
 const { loadConnectionConfig, syncConnection } = require('./services/kiotVietConnectionService');
 const { startKiotVietSyncScheduler } = require('./services/kiotVietSyncScheduler');
 const { getMobileBaseUrl } = require('./services/lanAddress');
@@ -76,7 +76,7 @@ app.post('/api/invoices/extract', requireAuth, invoiceImageUpload.single('invoic
   try {
     const userId = currentUserId(req);
     const buyer = (await pool.query('SELECT store_name, tax_code, address, phone, email FROM users WHERE user_id=$1', [userId])).rows[0] || {};
-    const gemini = await extractInvoiceFromImage(req.file, { apiKey: await loadGeminiApiKey(pool, userId), buyer });
+    const gemini = await extractInvoiceFromImage(req.file, { connection: await loadGeminiConnection(pool, userId), buyer });
     const corresponding = await mapExtractedInvoice(pool, gemini, userId);
     res.json({ gemini, corresponding });
   } catch (error) {

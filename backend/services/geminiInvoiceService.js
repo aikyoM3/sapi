@@ -1,5 +1,5 @@
-const { GoogleGenAI } = require('@google/genai');
-const { invoiceExtractionPrompt } = require('./geminiInvoicePrompt');
+const { createGeminiClient, getGeminiEndpointSettings, redactGeminiSecrets } = require('./geminiClient');
+const { invoiceExtractionPrompt, getInvoicePromptPlan } = require('./geminiInvoicePrompt');
 
 // This is the application's standardized Gemini response. Do not rename fields without a migration.
 const invoiceSchema = {
@@ -33,17 +33,26 @@ const invoiceSchema = {
         additionalProperties: false,
         properties: {
           name: { type: ['string', 'null'] },
-          quantity: { type: ['number', 'null'] },
-          unit: { type: ['string', 'null'] },
-          unit_price: { type: ['number', 'null'] },
-          total_price: { type: ['number', 'null'] },
+          quantity: { type: ['number', 'null'], description: 'Quantity printed for this line; do not multiply it by the package factor.' },
+          unit: { type: ['string', 'null'], description: 'Copy the unit label from this invoice line exactly. Never infer or rename it from packaging or arithmetic.' },
+          package_quantity: { type: ['number', 'null'], description: 'Explicit package/bulk factor only; null when no factor is shown.' },
+          package_unit: { type: ['string', 'null'], description: 'Explicit child/package unit only; null when it is not shown clearly.' },
+          unit_price: { type: ['number', 'null'], description: 'Price printed for the line; do not convert it to force quantity multiplied by price.' },
+          price_unit: { type: ['string', 'null'], description: 'Unit to which unit_price explicitly applies; null when not shown clearly.' },
+          total_price: { type: ['number', 'null'], description: 'Printed line total. It may include an explicit package factor; preserve it instead of recalculating.' },
+          line_type: { type: 'string', enum: ['PRODUCT', 'PROMOTION_ITEM'] },
+          line_status: { type: 'string', enum: ['ACTIVE', 'CANCELLED', 'UNCERTAIN'] },
+          status_reason: { type: ['string', 'null'] },
         },
-        required: ['name', 'quantity', 'unit', 'unit_price', 'total_price'],
+        required: ['name', 'quantity', 'unit', 'package_quantity', 'package_unit', 'unit_price', 'price_unit', 'total_price', 'line_type', 'line_status', 'status_reason'],
       },
     },
+    promotions: { type: 'array', items: { type: 'object', additionalProperties: false,
+      properties: { description: { type: ['string', 'null'] }, amount: { type: ['number', 'null'] } },
+      required: ['description', 'amount'] } },
     total_amount: { type: ['number', 'null'] },
   },
-  required: ['supplier', 'invoice', 'items', 'total_amount'],
+  required: ['supplier', 'invoice', 'items', 'promotions', 'total_amount'],
 };
 
 class GeminiInvoiceError extends Error {
@@ -54,37 +63,108 @@ class GeminiInvoiceError extends Error {
   }
 }
 
-function config(apiKeyOverride) {
+function getExtractionSettings(connection = {}) {
+  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS || 120000);
+  const temperature = Number(process.env.GEMINI_TEMPERATURE ?? 0);
+  const promptPlan = getInvoicePromptPlan();
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw new GeminiInvoiceError('GEMINI_TEMPERATURE phải nằm trong khoảng 0 đến 2.', 503);
+  return {
+    temperature,
+    ...getGeminiEndpointSettings(connection.baseUrl),
+    providerFallbacks: (connection.fallbackConnections || []).map((item) => getGeminiEndpointSettings(item.baseUrl)),
+    model: String(process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim(),
+    fallbackModel: String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.8-flash').trim(),
+    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
+    promptVersion: promptPlan[0].version,
+    promptFallbackVersion: promptPlan[1]?.version || null,
+  };
+}
+
+function config(apiKeyOverride, connection) {
   const apiKey = String(apiKeyOverride || process.env.GEMINI_API_KEY || '').trim();
   if (!apiKey) {
     throw new GeminiInvoiceError('Gemini chưa được cấu hình. Hãy đặt GEMINI_API_KEY trong backend/.env rồi restart server (Ctrl+C, npm.cmd start).', 503);
   }
-  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS || 120000);
-  return {
-    apiKey,
-    model: String(process.env.GEMINI_MODEL || 'gemini-2.5-flash').trim(),
-    timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
-  };
+  const candidates = [{ apiKey, ...getGeminiEndpointSettings(connection?.baseUrl) }, ...(connection?.fallbackConnections || []).map((item) => ({
+    apiKey: String(item.apiKey || '').trim(), ...getGeminiEndpointSettings(item.baseUrl),
+  }))];
+  const providers = candidates.filter((item, index) => item.apiKey && !candidates.slice(0, index).some((prior) => prior.apiKey === item.apiKey && prior.baseUrl === item.baseUrl));
+  return { providers, ...getExtractionSettings(connection) };
 }
 
-function redactSecrets(text) {
-  return String(text || '')
-    .replace(/AIza[0-9A-Za-z_-]{8,}/g, '[redacted]')
-    .replace(/(api[_-]?key|key)=([^&\s]+)/gi, '$1=[redacted]');
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// A provider-side deadline (504) is not helped by immediately resubmitting the
+// same, often image-heavy, request. Retry short-lived capacity errors only.
+const retryableGeminiError = (error) => [429, 500, 502, 503].includes(Number(error?.status || error?.statusCode));
+const MAX_ATTEMPTS_PER_MODEL = 2;
+
+async function generateWithRetry(ai, models, request, attempts, provider, promptVersion) {
+  let lastError;
+  for (const model of [...new Set(models.filter(Boolean))]) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+      const started = Date.now();
+      try {
+        const response = await ai.models.generateContent({ model, ...request });
+        attempts.push({ provider: provider.provider, base_url: provider.baseUrl, prompt_version: promptVersion, model, attempt: attempt + 1, elapsed_ms: Date.now() - started, status: 'success' });
+        return { response, model };
+      }
+      catch (error) {
+        attempts.push({ provider: provider.provider, base_url: provider.baseUrl, prompt_version: promptVersion, model, attempt: attempt + 1, elapsed_ms: Date.now() - started, status: 'error', http_status: Number(error?.status || error?.statusCode) || null, error: redactSecrets(error?.message, provider.apiKey) });
+        lastError = error;
+        if (!retryableGeminiError(error) || attempt === MAX_ATTEMPTS_PER_MODEL - 1) break;
+        await wait(1000 * (attempt + 1));
+      }
+    }
+  }
+  throw lastError;
+}
+
+function providerFailoverError(error) {
+  const status = Number(error?.status || error?.statusCode);
+  return [401, 402, 403, 404, 408, 429, 500, 502, 503, 504].includes(status)
+    || (status === 400 && /API_KEY_INVALID|API key not valid|invalid api.?key/i.test(error?.message || ''))
+    || ['AbortError', 'RequestTimeoutError'].includes(error?.name)
+    || /abort|timeout|timed out|fetch failed/i.test(error?.message || '');
+}
+
+async function generateAcrossProviders(providers, models, request, attempts, promptVersion, timeoutMs) {
+  let lastError;
+  for (const provider of providers) {
+    const ai = createGeminiClient(provider.apiKey, { timeoutMs, baseUrl: provider.baseUrl });
+    try {
+      const generated = await generateWithRetry(ai, models, request, attempts, provider, promptVersion);
+      return { ...generated, provider };
+    } catch (error) {
+      lastError = error;
+      if (!providerFailoverError(error)) break;
+    }
+  }
+  throw lastError;
+}
+
+function redactSecrets(text, apiKeys) {
+  return (Array.isArray(apiKeys) ? apiKeys : [apiKeys]).reduce((value, apiKey) => redactGeminiSecrets(value, apiKey), String(text || ''));
 }
 
 function mapSdkError(error) {
   const status = Number(error?.status || error?.statusCode);
   const detail = redactSecrets(error?.message || '').slice(0, 300);
   const aborted = /aborted/i.test(detail);
-  if (error?.name === 'RequestTimeoutError' || error?.name === 'AbortError' || aborted || status === 408 || status === 504) {
-    return new GeminiInvoiceError('Gemini hết thời gian chờ (request bị abort). Tăng GEMINI_TIMEOUT_MS trong backend/.env (ví dụ 120000), restart server, rồi thử lại. Ảnh hóa đơn thường cần hơn 30 giây.', 504);
+  if (status === 504) {
+    return new GeminiInvoiceError('Gemini không hoàn tất yêu cầu trước deadline của nhà cung cấp. Đây không phải lỗi ảnh hay API key; hãy thử lại sau.', 504);
+  }
+  if (error?.name === 'RequestTimeoutError' || error?.name === 'AbortError' || aborted || status === 408) {
+    return new GeminiInvoiceError('Kết nối tới Gemini hết thời gian chờ. Hãy kiểm tra mạng rồi thử lại.', 504);
   }
   if (status === 401 || status === 403) {
     return new GeminiInvoiceError(status === 401 ? 'Gemini API Key không hợp lệ. Hãy kiểm tra lại API Key hoặc tạo key mới.' : 'API Key đã được nhận nhưng không thể sử dụng model Gemini hiện tại. Hãy kiểm tra quyền API hoặc cấu hình model.', 503);
   }
   if (status === 404) {
-    return new GeminiInvoiceError('Model Gemini không tồn tại hoặc key không dùng được model này. Đổi GEMINI_MODEL (ví dụ gemini-2.0-flash) trong backend/.env rồi restart server.', 502);
+    return new GeminiInvoiceError('Model Gemini không tồn tại hoặc key không dùng được model này trên endpoint đã cấu hình. Kiểm tra GEMINI_MODEL và gói model của key, rồi restart server nếu đổi .env.', 502);
+  }
+  if (status === 402) {
+    return new GeminiInvoiceError('Tài khoản API không đủ credit hoặc chưa kích hoạt thanh toán. Kiểm tra số dư tại nhà cung cấp API đang dùng.', 402);
   }
   if (status === 429) {
     return new GeminiInvoiceError('Gemini API hiện đã đạt giới hạn sử dụng. Vui lòng thử lại sau hoặc kiểm tra quota của API Key.', 429);
@@ -133,10 +213,20 @@ function validateInvoice(payload) {
         name: nullableString(item.name, `items[${index}].name`),
         quantity: nullableNumber(item.quantity, `items[${index}].quantity`),
         unit: nullableString(item.unit, `items[${index}].unit`),
+        package_quantity: nullableNumber(item.package_quantity, `items[${index}].package_quantity`),
+        package_unit: nullableString(item.package_unit, `items[${index}].package_unit`),
         unit_price: nullableNumber(item.unit_price, `items[${index}].unit_price`),
+        price_unit: nullableString(item.price_unit, `items[${index}].price_unit`),
         total_price: nullableNumber(item.total_price, `items[${index}].total_price`),
+        line_type: ['PRODUCT', 'PROMOTION_ITEM'].includes(item.line_type) ? item.line_type : 'PRODUCT',
+        line_status: ['ACTIVE', 'CANCELLED', 'UNCERTAIN'].includes(item.line_status) ? item.line_status : 'UNCERTAIN',
+        status_reason: nullableString(item.status_reason, `items[${index}].status_reason`),
       };
     }),
+    promotions: (Array.isArray(payload.promotions) ? payload.promotions : []).map((promotion, index) => ({
+      description: nullableString(promotion.description, `promotions[${index}].description`),
+      amount: nullableNumber(promotion.amount, `promotions[${index}].amount`),
+    })),
     total_amount: nullableNumber(payload.total_amount, 'total_amount'),
   };
 }
@@ -168,42 +258,74 @@ function removeBuyerFromSupplier(invoice, buyer = {}) {
   return invoice;
 }
 
-async function extractInvoiceFromImages(files, options = {}) {
+// Detailed results are for offline experiments. The web API keeps returning only
+// the same standardized invoice as before; no matching or persistence is added.
+async function extractInvoiceFromImagesDetailed(files, options = {}) {
   if (!Array.isArray(files) || !files.length || files.some((file) => !file?.buffer || !file?.mimetype)) {
     throw new GeminiInvoiceError('Cần có ít nhất một ảnh hóa đơn.', 400);
   }
 
-  const { apiKey, model, timeoutMs } = config(options.apiKey);
-  const ai = new GoogleGenAI({ apiKey });
+  const configured = config(options.connection?.apiKey || options.apiKey, options.connection);
+  const providers = configured.providers;
+  const models = [configured.model, configured.fallbackModel];
+  const { timeoutMs, temperature } = configured;
+  const diagnostics = { attempts: [], model_used: null, model_version: null, provider_used: null, base_url_used: null, prompt_used: null, prompt_failures: [], raw_text: null, raw_json: null };
   try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: [{ role: 'user', parts: [
-        { text: `Có ${files.length} ảnh theo đúng thứ tự trang của CÙNG MỘT hóa đơn. Hãy gộp tất cả các trang thành một JSON duy nhất.` },
-        ...files.map((file) => ({ inlineData: { mimeType: file.mimetype, data: file.buffer.toString('base64') } })),
-        ...(buildBuyerContext(options.buyer) ? [{ text: buildBuyerContext(options.buyer) }] : []),
-        { text: invoiceExtractionPrompt },
-      ] }],
-      config: {
-        temperature: 0,
-        responseMimeType: 'application/json',
-        responseJsonSchema: invoiceSchema,
-        httpOptions: { timeout: timeoutMs },
-      },
-    });
-
-    if (!response.text) throw new GeminiInvoiceError('Gemini trả về response rỗng. Thử lại, hoặc đổi GEMINI_MODEL rồi restart server.');
-    return removeBuyerFromSupplier(validateInvoice(JSON.parse(response.text)), options.buyer);
+    const commonParts = [
+      { text: `Có ${files.length} ảnh theo đúng thứ tự trang của CÙNG MỘT hóa đơn. Hãy gộp tất cả các trang thành một JSON duy nhất.` },
+      ...files.map((file) => ({ inlineData: { mimeType: file.mimetype, data: file.buffer.toString('base64') } })),
+      ...(buildBuyerContext(options.buyer) ? [{ text: buildBuyerContext(options.buyer) }] : []),
+    ];
+    const promptPlan = getInvoicePromptPlan();
+    let preferredFallbackProvider = null;
+    let preferredFallbackModels = null;
+    for (let promptIndex = 0; promptIndex < promptPlan.length; promptIndex += 1) {
+      const prompt = promptPlan[promptIndex];
+      const orderedProviders = preferredFallbackProvider
+        ? [preferredFallbackProvider, ...providers.filter((item) => item.apiKey !== preferredFallbackProvider.apiKey || item.baseUrl !== preferredFallbackProvider.baseUrl)]
+        : providers;
+      const orderedModels = preferredFallbackModels || models;
+      const generated = await generateAcrossProviders(orderedProviders, orderedModels, {
+        contents: [{ role: 'user', parts: [...commonParts, { text: prompt.text }] }],
+        config: { temperature, responseMimeType: 'application/json', responseJsonSchema: invoiceSchema, httpOptions: { timeout: timeoutMs } },
+      }, diagnostics.attempts, prompt.version, timeoutMs);
+      const { response } = generated;
+      diagnostics.model_used = generated.model;
+      diagnostics.model_version = response.modelVersion || null;
+      diagnostics.provider_used = generated.provider.provider;
+      diagnostics.base_url_used = generated.provider.baseUrl;
+      diagnostics.prompt_used = prompt.version;
+      diagnostics.raw_text = response.text || null;
+      diagnostics.usage = response.usageMetadata || null;
+      try {
+        if (!response.text) throw new GeminiInvoiceError('Dịch vụ trích xuất trả về response rỗng.');
+        diagnostics.raw_json = JSON.parse(response.text);
+        const invoice = removeBuyerFromSupplier(validateInvoice(diagnostics.raw_json), options.buyer);
+        return { invoice, ...diagnostics };
+      } catch (error) {
+        diagnostics.prompt_failures.push({ prompt_version: prompt.version, provider: generated.provider.provider, model: generated.model, error: redactSecrets(error.message, providers.map((item) => item.apiKey)) });
+        if (promptIndex === promptPlan.length - 1) throw error;
+        preferredFallbackProvider = generated.provider;
+        preferredFallbackModels = generated.model === configured.model ? [configured.fallbackModel, configured.model] : [configured.model, configured.fallbackModel];
+      }
+    }
+    throw new GeminiInvoiceError('Không có prompt trích xuất khả dụng.');
   } catch (error) {
-    if (error instanceof GeminiInvoiceError) throw error;
-    if (error instanceof SyntaxError) throw new GeminiInvoiceError('Gemini trả về JSON không hợp lệ (không đúng schema). Không dùng dữ liệu bịa; hãy thử lại hoặc kiểm tra prompt.');
-    console.error('Gemini invoice extraction failed:', error?.status || error?.statusCode, redactSecrets(error?.message));
-    throw mapSdkError(error);
+    const safeError = Object.assign(new Error(redactSecrets(error?.message, providers.map((item) => item.apiKey))), { status: error?.status, statusCode: error?.statusCode, name: error?.name });
+    const mapped = error instanceof GeminiInvoiceError ? error : error instanceof SyntaxError
+      ? new GeminiInvoiceError('Gemini trả về JSON không hợp lệ (không đúng schema). Không dùng dữ liệu bịa; hãy thử lại hoặc kiểm tra prompt.') : mapSdkError(safeError);
+    mapped.diagnostics = diagnostics;
+    if (!(error instanceof GeminiInvoiceError) && !(error instanceof SyntaxError)) console.error('Gemini invoice extraction failed:', safeError.status || safeError.statusCode, safeError.message);
+    throw mapped;
   }
+}
+
+async function extractInvoiceFromImages(files, options = {}) {
+  return (await extractInvoiceFromImagesDetailed(files, options)).invoice;
 }
 
 async function extractInvoiceFromImage(file, options = {}) {
   return extractInvoiceFromImages([file], options);
 }
 
-module.exports = { extractInvoiceFromImage, extractInvoiceFromImages, GeminiInvoiceError, invoiceSchema, buildBuyerContext, removeBuyerFromSupplier };
+module.exports = { extractInvoiceFromImage, extractInvoiceFromImages, extractInvoiceFromImagesDetailed, getExtractionSettings, GeminiInvoiceError, invoiceSchema, buildBuyerContext, removeBuyerFromSupplier };

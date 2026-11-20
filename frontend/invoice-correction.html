@@ -6,9 +6,9 @@
     <title>Sửa hóa đơn - SAPI</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@latest/dist/css/tabler.css" />
     <style>
-      .invoice-table{min-width:1180px;table-layout:fixed}.invoice-table th{font-size:.72rem;white-space:normal;background:var(--tblr-bg-surface-secondary)}
-      .invoice-table td{vertical-align:top}.invoice-table .col-index{width:4%}.invoice-table .col-name{width:19%}.invoice-table .col-map{width:22%}.invoice-table .col-qty{width:7%}.invoice-table .col-unit{width:9%}.invoice-table .col-price{width:11%}.invoice-table .col-total{width:12%}
-      .read-name{white-space:normal;overflow-wrap:anywhere;line-height:1.35}.suggestion-wrap{position:relative}.suggestions{position:absolute;z-index:20;left:0;right:0;top:100%;max-height:240px;overflow:auto;background:white;border:1px solid var(--tblr-border-color);box-shadow:var(--tblr-box-shadow);display:none}.suggestions.show{display:block}.suggestion{padding:.55rem .75rem;cursor:pointer}.suggestion:hover{background:var(--tblr-bg-surface-secondary)}
+      .invoice-table{min-width:1780px;table-layout:fixed}.invoice-table th{font-size:.72rem;white-space:normal;background:var(--tblr-bg-surface-secondary);vertical-align:middle}.invoice-table th .th-line{display:block;white-space:nowrap}
+      .invoice-table td{vertical-align:top}.invoice-table .col-index{width:3%}.invoice-table .col-name{width:14%}.invoice-table .col-map{width:15%}.invoice-table .col-qty{width:6%}.invoice-table .col-unit{width:7%}.invoice-table .col-detail{width:10%}.invoice-table .col-price{width:8%}.invoice-table .col-total{width:9%}.invoice-table .col-action{width:6%}
+      .read-name{white-space:normal;overflow-wrap:anywhere;line-height:1.35}.suggestion-wrap{position:relative}.suggestions{position:absolute;z-index:20;left:0;right:0;top:100%;max-height:240px;overflow:auto;background:white;border:1px solid var(--tblr-border-color);box-shadow:var(--tblr-box-shadow);display:none}.suggestions.show{display:block}.suggestion{padding:.55rem .75rem;cursor:pointer}.suggestion:hover,.suggestion.active{background:var(--tblr-primary-lt);color:var(--tblr-primary)}
       .summary{width:min(100%,420px);margin-left:auto}.summary-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0}.summary-total{border-top:1px solid var(--tblr-border-color);font-size:1.15rem;font-weight:700}.invoice-images{display:flex;gap:1rem;overflow:auto}.invoice-images figure{min-width:260px;margin:0}.invoice-images img{width:260px;height:340px;object-fit:contain;background:#f1f3f5}
       #gemini-dialog{width:min(90vw,800px);max-height:80vh;border:1px solid var(--tblr-border-color);border-radius:.5rem}#gemini-dialog pre{white-space:pre-wrap}
     </style>
@@ -27,11 +27,12 @@
             <div class="col-md-6"><label class="form-label">Số hóa đơn</label><input id="invoice-number" class="form-control" /></div><div class="col-md-6"><label class="form-label">Ngày hóa đơn</label><input id="invoice-date" class="form-control" type="date" /></div>
           </div></div>
         </div></div></div>
-        <div class="card"><div class="card-header"><h3 class="card-title">Nội dung hóa đơn</h3></div><div class="table-responsive"><table class="table table-bordered table-striped table-hover invoice-table mb-0">
-          <thead><tr><th class="col-index text-center">STT</th><th class="col-name">Tên hàng đọc được</th><th class="col-map">Tên hàng tương ứng</th><th class="col-qty text-end">SL đọc được</th><th class="col-qty text-end">SL sử dụng</th><th class="col-unit">Đơn vị đọc được</th><th class="col-unit">Đơn vị sử dụng</th><th class="col-price text-end">Đơn giá</th><th class="col-total text-end">Thành tiền</th></tr></thead>
-          <tbody id="items"></tbody><tfoot><tr><th colspan="8" class="text-end">Tổng tiền hàng</th><th id="table-subtotal" class="text-end">0</th></tr></tfoot>
+        <div class="card"><div class="card-header"><h3 class="card-title">Nội dung hóa đơn</h3></div><div id="ocr-audit" class="card-body border-bottom d-none"></div><div class="table-responsive"><table class="table table-bordered table-striped table-hover invoice-table mb-0">
+          <thead><tr><th class="col-index text-center">STT</th><th class="col-name">Tên hàng đọc được</th><th class="col-map">Tên hàng tương ứng</th><th class="col-qty text-end"><span class="th-line">SL</span><span class="th-line">đọc được</span></th><th class="col-qty text-end"><span class="th-line">SL</span><span class="th-line">sử dụng</span></th><th class="col-unit"><span class="th-line">Đơn vị</span><span class="th-line">đọc được</span></th><th class="col-unit"><span class="th-line">Đơn vị</span><span class="th-line">sử dụng</span></th><th class="col-detail">Quy cách / cơ sở giá</th><th class="col-price text-end"><span class="th-line">Đơn giá</span><span class="th-line">đọc được</span></th><th class="col-price text-end"><span class="th-line">Đơn giá</span><span class="th-line">sử dụng</span></th><th class="col-total text-end"><span class="th-line">Thành tiền</span><span class="th-line">đọc được</span></th><th class="col-total text-end"><span class="th-line">Thành tiền</span><span class="th-line">sử dụng</span></th><th class="col-action text-center">Thao tác</th></tr></thead>
+          <tbody id="items"></tbody><tfoot><tr><th colspan="11" class="text-end">Tổng tiền hàng</th><th id="table-subtotal" class="text-end">0</th><td></td></tr></tfoot>
         </table></div><div class="card-body"><div class="summary"><div class="summary-row"><span>Tổng tiền hàng</span><strong id="subtotal">0</strong></div><div class="summary-row"><label for="discount">Tổng giá trị chiết khấu</label><input id="discount" class="form-control text-end" type="number" min="0" step="0.01" value="0" style="max-width:180px" /></div><div class="summary-row summary-total"><span>Tổng thanh toán</span><span id="grand-total">0</span></div></div></div>
-          <div class="card-footer d-flex justify-content-end"><button id="confirm" class="btn btn-primary">Xác nhận hóa đơn</button></div>
+          <div id="items-warning" class="alert alert-warning mx-3 d-none" role="alert"></div>
+          <div class="card-footer d-flex justify-content-end"><button id="confirm" class="btn btn-primary" disabled>Xác nhận hóa đơn</button></div>
         </div>
       </div></div>
     </div>
@@ -43,8 +44,15 @@
     const sessionToken = new URLSearchParams(location.search).get('session');
     const itemsBody = document.querySelector('#items');
     let extraction = null;
+    let confirming = false;
     const numberValue = (element) => Math.max(0, Number(element.value) || 0);
     const text = (value) => value === null || value === undefined ? '' : String(value);
+    function initialUsedPrice(item, mapped) {
+      const quantity = Number(mapped?.quantity ?? item.quantity); const total = Number(item.total_price); const price = Number(mapped?.unit_price ?? item.unit_price);
+      if (quantity > 0 && item.total_price !== null && item.total_price !== undefined && Number.isFinite(total) && total >= 0
+          && (!Number.isFinite(price) || Math.abs(quantity * price - total) > Math.max(.01, Math.abs(total) * .000001))) return total / quantity;
+      return mapped?.unit_price ?? item.unit_price;
+    }
 
     async function api(url, options = {}) {
       const response = await fetch(url, options);
@@ -55,40 +63,79 @@
     }
     function debounce(callback, wait = 320) { let timeout; return (...args) => { clearTimeout(timeout); timeout = setTimeout(() => callback(...args), wait); }; }
     function buildSuggestions(input, container, endpoint, onSelect) {
+      let results = []; let activeIndex = -1; let requestId = 0;
+      const listId = container.id || `suggestions-${Math.random().toString(36).slice(2)}`; container.id = listId; container.setAttribute('role', 'listbox');
+      input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-controls', listId); input.setAttribute('aria-expanded', 'false');
+      const close = () => { container.classList.remove('show'); input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); activeIndex = -1; container.querySelectorAll('.suggestion.active').forEach((option) => option.classList.remove('active')); };
+      const activate = (index) => {
+        const options = [...container.querySelectorAll('.suggestion')]; if (!options.length) return;
+        activeIndex = (index + options.length) % options.length;
+        options.forEach((option, optionIndex) => { const active = optionIndex === activeIndex; option.classList.toggle('active', active); option.setAttribute('aria-selected', active ? 'true' : 'false'); });
+        input.setAttribute('aria-activedescendant', options[activeIndex].id); options[activeIndex].scrollIntoView({ block: 'nearest' });
+      };
+      const select = (index) => { if (!results[index]) return; onSelect(results[index]); close(); };
       const search = debounce(async () => {
-        const query = input.value.trim(); input.dataset.selectedId = ''; if (query.length < 2) { container.classList.remove('show'); return; }
+        const query = input.value.trim(); const currentRequest = ++requestId; input.dataset.selectedId = ''; if (query.length < 2) { results = []; container.replaceChildren(); close(); return; }
         try {
-          const results = await api(`${endpoint}?q=${encodeURIComponent(query)}`); container.replaceChildren();
-          results.forEach((result) => {
-            const option = document.createElement('div'); option.className = 'suggestion'; option.textContent = result.product_name || result.supplier_name;
+          const response = await api(`${endpoint}?q=${encodeURIComponent(query)}`); if (currentRequest !== requestId || input.value.trim() !== query) return;
+          results = response; activeIndex = -1; input.removeAttribute('aria-activedescendant'); container.replaceChildren();
+          results.forEach((result, index) => {
+            const option = document.createElement('div'); option.className = 'suggestion'; option.id = `${listId}-option-${index}`; option.setAttribute('role', 'option');
+            option.textContent = result.product_name ? `${result.product_name}${result.primary_unit ? ` (${result.primary_unit})` : ''}` : result.supplier_name;
             if (result.matched_external_names?.length) { const note = document.createElement('small'); note.className = 'd-block text-secondary'; note.textContent = `Khớp: ${result.matched_external_names.join(', ')}`; option.append(note); }
-            option.addEventListener('mousedown', (event) => { event.preventDefault(); onSelect(result); container.classList.remove('show'); }); container.append(option);
+            option.addEventListener('mouseenter', () => activate(index)); option.addEventListener('mousedown', (event) => { event.preventDefault(); select(index); }); container.append(option);
           });
-          container.classList.toggle('show', results.length > 0);
-        } catch { container.classList.remove('show'); }
+          container.classList.toggle('show', results.length > 0); input.setAttribute('aria-expanded', results.length > 0 ? 'true' : 'false');
+        } catch { results = []; close(); }
       });
-      input.addEventListener('input', search); input.addEventListener('blur', () => setTimeout(() => container.classList.remove('show'), 150));
+      input.addEventListener('input', () => { requestId += 1; results = []; container.replaceChildren(); close(); search(); });
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { if (!results.length) return; event.preventDefault(); container.classList.add('show'); input.setAttribute('aria-expanded', 'true'); const nextIndex = event.key === 'ArrowDown' ? activeIndex + 1 : activeIndex < 0 ? results.length - 1 : activeIndex - 1; activate(nextIndex); }
+        else if (event.key === 'Enter' && activeIndex >= 0 && container.classList.contains('show')) { event.preventDefault(); select(activeIndex); }
+        else if (event.key === 'Escape' && container.classList.contains('show')) { event.preventDefault(); close(); }
+      });
+      input.addEventListener('blur', () => setTimeout(close, 150));
     }
     function createInput(className, value, type = 'text') { const input = document.createElement('input'); input.className = `form-control ${className}`; input.type = type; input.value = text(value); if (type === 'number') { input.min = '0'; input.step = '0.01'; } return input; }
     function td(content, className = '') { const cell = document.createElement('td'); cell.className = className; if (content instanceof HTMLElement) cell.append(content); else cell.textContent = text(content); return cell; }
     function addItem(item, mapped, index) {
-      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name);
+      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit);
+      if (item.line_status === 'UNCERTAIN') row.classList.add('table-warning');
       const productWrap = document.createElement('div'); productWrap.className = 'suggestion-wrap';
       const productInput = createInput('product-name', mapped?.name); productInput.dataset.productId = text(mapped?.product_id);
+      productInput.addEventListener('input', () => { productInput.dataset.productId = ''; });
       const suggestions = document.createElement('div'); suggestions.className = 'suggestions'; productWrap.append(productInput, suggestions);
-      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; const unit = row.querySelector('.line-unit'); if (!unit.value && product.primary_unit) unit.value = product.primary_unit; });
-      row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), td(createInput('line-price text-end', mapped?.unit_price ?? item.unit_price, 'number')));
-      const total = document.createElement('strong'); total.className = 'line-total'; row.append(td(total, 'text-end')); itemsBody.append(row);
+      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; row.querySelector('.line-unit').value = text(product.primary_unit); });
+      const usedPrice = initialUsedPrice(item, mapped); const normalized = item.total_price != null && item.quantity > 0 && Number(item.unit_price) * Number(item.quantity) !== Number(item.total_price);
+      const details = [item.package_quantity && `${item.package_quantity} ${text(item.package_unit)}`.trim(), item.price_unit && `Giá theo ${item.price_unit}`, normalized && 'Đơn giá sử dụng đã quy đổi theo thành tiền', item.line_type === 'PROMOTION_ITEM' && 'Hàng khuyến mại', item.line_status === 'UNCERTAIN' && `Cần kiểm tra: ${text(item.status_reason)}`].filter(Boolean).join(' · ');
+      row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), td(details), td(item.unit_price, 'text-end'), td(createInput('line-price text-end', usedPrice, 'number')), td(item.total_price, 'text-end'));
+      const total = document.createElement('strong'); total.className = 'line-total'; row.append(td(total, 'text-end'));
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-sm btn-outline-danger delete-line'; remove.textContent = 'Xóa'; remove.setAttribute('aria-label', `Xóa dòng ${index + 1}: ${text(item.name)}`);
+      remove.addEventListener('click', async () => {
+        if (confirming || !await SapiUI.confirmAction(`Loại “${text(item.name) || 'dòng hàng này'}” khỏi hóa đơn? Hàng trong danh mục và JSON OCR gốc không bị xóa.`, { title: 'Xóa dòng hàng', confirmLabel: 'Xóa dòng' }) || confirming) return;
+        row.remove(); updateTotals(); SapiUI.notify('Đã xóa dòng khỏi hóa đơn.');
+      });
+      row.append(td(remove, 'text-center')); itemsBody.append(row);
+      row.querySelectorAll('input').forEach((input) => input.setAttribute('aria-label', `${input.classList.contains('product-name') ? 'Hàng hóa tương ứng' : input.classList.contains('line-quantity') ? 'Số lượng sử dụng' : input.classList.contains('line-unit') ? 'Đơn vị sử dụng' : 'Đơn giá sử dụng'} dòng ${index + 1}`));
+      row.querySelectorAll('input[type="number"]').forEach((input) => { input.required = true; });
+      row.querySelector('.line-quantity').min = '0.01';
     }
     function updateTotals() {
-      let subtotal = 0; document.querySelectorAll('.invoice-line').forEach((row) => { const total = numberValue(row.querySelector('.line-quantity')) * numberValue(row.querySelector('.line-price')); row.querySelector('.line-total').textContent = money.format(total); subtotal += total; });
+      const rows = [...itemsBody.querySelectorAll('.invoice-line')];
+      let subtotal = 0; rows.forEach((row, index) => { row.cells[0].textContent = index + 1; row.querySelector('.delete-line').setAttribute('aria-label', `Xóa dòng ${index + 1}: ${row.dataset.externalName}`); row.querySelectorAll('input[aria-label]').forEach((input) => input.setAttribute('aria-label', input.getAttribute('aria-label').replace(/ dòng \d+$/, ` dòng ${index + 1}`))); const total = numberValue(row.querySelector('.line-quantity')) * numberValue(row.querySelector('.line-price')); row.querySelector('.line-total').textContent = money.format(total); subtotal += total; });
       const discount = numberValue(document.querySelector('#discount')); document.querySelector('#table-subtotal').textContent = money.format(subtotal); document.querySelector('#subtotal').textContent = money.format(subtotal); document.querySelector('#grand-total').textContent = money.format(Math.max(0, subtotal - discount));
+      const warning = document.querySelector('#items-warning');
+      warning.textContent = !rows.length ? 'Hóa đơn không còn dòng hàng. Không thể xác nhận hóa đơn rỗng.' : discount > subtotal ? 'Chiết khấu đang lớn hơn tổng tiền hàng. Hãy điều chỉnh trước khi xác nhận.' : '';
+      warning.classList.toggle('d-none', !warning.textContent);
+      document.querySelector('#confirm').disabled = confirming || !extraction || !rows.length || discount > subtotal;
     }
     function populate(payload) {
       extraction = payload.extraction; const gemini = extraction.gemini; const mapped = extraction.corresponding || {}; const supplier = gemini.supplier || {}; const invoice = gemini.invoice || {};
       document.querySelector('#read-supplier').textContent = text(supplier.name) || '—'; document.querySelector('#read-phone').textContent = text(supplier.phone) || '—'; document.querySelector('#read-address').textContent = text(supplier.address) || '—';
       document.querySelector('#supplier-id').value = text(mapped.supplier?.supplier_id); document.querySelector('#supplier-name').value = text(mapped.supplier?.name || supplier.name); document.querySelector('#supplier-phone').value = text(mapped.supplier?.phone || supplier.phone); document.querySelector('#supplier-address').value = text(mapped.supplier?.address || supplier.address); document.querySelector('#invoice-number').value = text(mapped.invoice?.number || invoice.number); document.querySelector('#invoice-date').value = text(mapped.invoice?.date || invoice.date);
-      (gemini.items?.length ? gemini.items : [{}]).forEach((item, index) => addItem(item, mapped.items?.[index], index));
+      (gemini.items || []).forEach((item, index) => { if ((item.line_status || 'ACTIVE') !== 'CANCELLED') addItem(item, mapped.items?.[index], index); });
+      const cancelled = (gemini.items || []).filter((item) => item.line_status === 'CANCELLED'); const uncertain = (gemini.items || []).filter((item) => item.line_status === 'UNCERTAIN'); const promotions = gemini.promotions || []; const audit = document.querySelector('#ocr-audit');
+      const notes = []; if (cancelled.length) notes.push(`Đã loại ${cancelled.length} dòng bị gạch/hủy: ${cancelled.map((item) => text(item.name)).join(', ')}`); if (uncertain.length) notes.push(`${uncertain.length} dòng chưa chắc chắn được tô vàng; hãy kiểm tra hoặc xóa.`); if (promotions.length) notes.push(`Khuyến mại/điều chỉnh đọc được: ${promotions.map((p) => `${text(p.description)}${p.amount == null ? '' : ` (${money.format(p.amount)})`}`).join('; ')}`); audit.textContent = notes.join('\n'); audit.style.whiteSpace = 'pre-line'; audit.classList.toggle('d-none', !notes.length);
       const imageBox = document.querySelector('#invoice-images'); payload.images.forEach((image) => { const figure = document.createElement('figure'); const img = document.createElement('img'); img.src = image.url; img.alt = `Trang ${image.pageNumber}`; const caption = document.createElement('figcaption'); caption.className = 'text-center mt-2'; caption.textContent = `Trang ${image.pageNumber}`; figure.append(img, caption); imageBox.append(figure); });
       document.querySelector('#gemini-json').textContent = JSON.stringify(gemini, null, 2); document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Kiểm tra dữ liệu OCR, chọn hàng hóa tương ứng rồi xác nhận. Thành tiền được tính từ SL sử dụng × Đơn giá.'; updateTotals();
     }
@@ -97,16 +144,21 @@
     itemsBody.addEventListener('input', updateTotals); document.querySelector('#discount').addEventListener('input', updateTotals);
     document.querySelector('#view-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').showModal()); document.querySelector('#close-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').close());
     document.querySelector('#confirm').addEventListener('click', async () => {
-      const button = document.querySelector('#confirm'); button.disabled = true; document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Đang tạo phiếu nhập nháp trên KiotViet…';
+      if (confirming) return;
+      const rows = [...itemsBody.querySelectorAll('.invoice-line')];
+      if (!rows.length) { updateTotals(); return; }
+      for (const input of itemsBody.querySelectorAll('input[type="number"]')) { if (!input.reportValidity()) return; }
+      if (!Number(document.querySelector('#supplier-id').value) || rows.some((row) => !Number(row.querySelector('.product-name').dataset.productId))) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = 'Hãy chọn nhà cung cấp và hàng hóa tương ứng từ danh mục KiotViet.'; return; }
+      const button = document.querySelector('#confirm'); confirming = true; button.disabled = true; button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang xác nhận…'; document.querySelectorAll('.delete-line').forEach((remove) => { remove.disabled = true; }); document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Đang tạo phiếu nhập nháp trên KiotViet…';
       try {
-        const items = Array.from(document.querySelectorAll('.invoice-line')).map((row) => ({ productId: Number(row.querySelector('.product-name').dataset.productId), externalName: row.dataset.externalName, quantity: row.querySelector('.line-quantity').value, unit: row.querySelector('.line-unit').value, unitPrice: row.querySelector('.line-price').value }));
+        const items = Array.from(document.querySelectorAll('.invoice-line')).map((row) => ({ productId: Number(row.querySelector('.product-name').dataset.productId), externalName: row.dataset.externalName, externalUnit: row.dataset.externalUnit, quantity: row.querySelector('.line-quantity').value, unit: row.querySelector('.line-unit').value, unitPrice: row.querySelector('.line-price').value }));
         const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ supplierId: Number(document.querySelector('#supplier-id').value) || null, supplierName: document.querySelector('#supplier-name').value, supplierPhone: document.querySelector('#supplier-phone').value, supplierAddress: document.querySelector('#supplier-address').value, invoiceNumber: document.querySelector('#invoice-number').value, invoiceDate: document.querySelector('#invoice-date').value || null, discountAmount: document.querySelector('#discount').value, items }) });
         document.querySelector('#notice').className = `alert alert-${result.status === 'SYNCED' ? 'success' : 'warning'}`;
         document.querySelector('#notice').textContent = result.status === 'SYNCED'
           ? `Đã lưu hóa đơn #${result.invoiceId} và tạo phiếu nhập KiotViet ${result.kiotVietPurchaseOrderCode || `#${result.kiotVietPurchaseOrderId}`}.`
           : result.warning;
         setTimeout(() => location.href = '/index.html', 1400);
-      } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; button.disabled = false; }
+      } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; confirming = false; button.textContent = 'Xác nhận hóa đơn'; document.querySelectorAll('.delete-line').forEach((remove) => { remove.disabled = false; }); updateTotals(); }
     });
     (async () => { if (!sessionToken) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = 'Thiếu token phiên hóa đơn.'; return; } try { const payload = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}`); if (payload.status !== 'READY_FOR_REVIEW') throw new Error('Phiên chưa sẵn sàng để hiệu chỉnh.'); populate(payload); } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; } })();
   </script>

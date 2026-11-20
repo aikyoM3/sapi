@@ -29,13 +29,19 @@ Do this on a clean machine (or after cloning the repo). One Node process serves 
    copy backend\.env.example backend\.env
    ```
 
-   Edit `backend/.env` and set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/app/apikey). Do not put the key in source files.
+   Edit `backend/.env` and set a development key from [Google AI Studio](https://aistudio.google.com/app/apikey). Do not put a key in source files or frontend code.
 
    | Variable | Required for Gemini test? | Notes |
    | --- | --- | --- |
-   | `GEMINI_API_KEY` | Yes | Empty key → upload previews the image but extraction fails with a clear error |
-   | `GEMINI_MODEL` | No | Default `gemini-2.5-flash` |
+   | `GEMINI_API_KEY_1` / `GEMINI_BASE_URL_1` | Recommended | First development provider; use Google's HTTPS root for an AI Studio key |
+   | `GEMINI_API_KEY_2` / `GEMINI_BASE_URL_2` | No | Optional second provider |
+   | `GEMINI_API_KEY` / `GEMINI_BASE_URL` | Yes if no numbered key | Legacy pair; when numbered providers exist this becomes the final fallback |
+   | `GEMINI_ALLOWED_BASE_URLS` | No | Additional trusted HTTPS origins allowed for personal keys, comma-separated; Google is always allowed |
+   | `GEMINI_MODEL` | No | Recommended `gemini-3.8-flash` |
+   | `GEMINI_FALLBACK_MODEL` | No | Recommended `gemini-3.6-flash`; keep a genuinely different model available to the key |
    | `GEMINI_TIMEOUT_MS` | No | Default `120000` (2 minutes). Vision extraction often exceeds 30s. |
+   | `GEMINI_PROMPT_VERSION` | No | `compact` by default; `detailed` selects the retained full prompt |
+   | `GEMINI_PROMPT_FALLBACK_ON_INVALID` | No | With `compact`, retry once using `detailed` only for an empty/invalid/schema-invalid response |
    | `PORT` | No | Default `3000` |
    | `DB_*` | No | Only for list pages / optional mapping lookup |
 
@@ -57,6 +63,50 @@ Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, st
 
 **After any change to `backend/.env` you must restart the server.** `dotenv` only reads the file at process start. Ctrl+C, then `npm.cmd start` again. Filling the key while Node is already running has no effect.
 
+### Gemini qua ShopAIKey (tùy chọn)
+
+SAPI vẫn dùng `@google/genai`, cùng prompt/schema và ngữ cảnh cửa hàng; chỉ thay endpoint và thông tin xác thực. Không cần cài Claude Code, Gemini CLI hoặc chạy script cài đặt của nhà bán.
+
+```dotenv
+GEMINI_BASE_URL=https://api.shopaikey.com
+GEMINI_API_KEY=your-private-shopaikey-key
+GEMINI_DEV_USE_ENV_KEY=true
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_FALLBACK_MODEL=gemini-3.6-flash
+GEMINI_TIMEOUT_MS=120000
+```
+
+Có thể ưu tiên key Google miễn phí rồi mới dùng gateway trả phí mà không đưa bí mật ra frontend:
+
+```dotenv
+GEMINI_API_KEY_1=your-google-ai-studio-key
+GEMINI_BASE_URL_1=https://generativelanguage.googleapis.com
+GEMINI_API_KEY=your-private-shopaikey-key
+GEMINI_BASE_URL=https://api.shopaikey.com
+```
+
+Với tài khoản đã chọn **Dùng key development**, backend thử toàn bộ model chính/dự phòng trên provider thứ nhất trước. Chỉ lỗi kết nối, timeout, quota, quyền/model hoặc lỗi máy chủ phù hợp mới chuyển sang provider tiếp theo. Lỗi request/schema HTTP 400 không bị gửi sang host khác. Log lần gọi ghi provider/model đã dùng nhưng không ghi key.
+
+Đặt key development thật **chỉ trong `backend/.env`**, file đã gitignore; không đưa key này ra frontend. Không thêm `/v1` vào URL của Google GenAI SDK. Cả kiểm tra kết nối và trích xuất đều dùng đúng key/host đã chọn cho tài khoản.
+
+Trong thông tin kết nối Gemini:
+
+- **Bỏ tick (cấu hình cá nhân)**: host mặc định `https://generativelanguage.googleapis.com` cho key Google AI Studio. Cho sửa host để dùng dịch vụ tương thích giao thức Gemini API. Key và host cá nhân được mã hóa trước khi lưu. Cấu hình này không phụ thuộc host/key development.
+- **Tick “Dùng key development”**: backend dùng chuỗi provider đánh số rồi đến cặp legacy trong `.env`. Hai ô key/host cá nhân bị vô hiệu hóa; form không hiện host thật hay nhà cung cấp development. API trạng thái không trả host/provider development. Request từ trình duyệt không được đổi host/key development; không lưu bản sao key development vào DB. Đổi cấu hình này trong `.env` rồi restart server.
+- Nhấn **Kiểm tra và lưu API Key** để áp dụng lựa chọn cho tài khoản hiện tại. `GEMINI_DEV_USE_ENV_KEY=true` chỉ cho phép chọn development, không tự áp dụng cho tài khoản mới chưa chọn. Đặt `false` để tắt quyền này. Các kết nối development đã lưu trước vẫn được đọc tương thích.
+- Host cá nhân khác Google cần được quản trị viên cho phép qua `GEMINI_ALLOWED_BASE_URLS=https://trusted-gateway.example` (nhiều host ngăn bằng dấu phẩy), rồi restart. Điều này ngăn backend truy cập host tùy ý/SSRF. Không công khai danh sách host này qua giao diện. Key và host phải thuộc cùng nhà cung cấp; backend chặn key Google gửi sang gateway và ngược lại.
+- Không thay đổi schema, hóa đơn, mapping hoặc KiotViet khi chuyển chế độ. Kết nối cũ được đọc tương thích; nếu key gateway đã lưu từ trước không còn trùng key `.env`, hãy chọn lại development và lưu.
+
+Model chính/dự phòng vẫn cấu hình qua `GEMINI_MODEL` và `GEMINI_FALLBACK_MODEL`. Model phải được nhà cung cấp đã chọn hỗ trợ; sửa host không tự chuyển đổi sang giao thức OpenAI/Anthropic. Nếu gặp quota/model không khả dụng, thông báo riêng thay vì kết luận key sai.
+
+Hai prompt được giữ trong `backend/services/geminiInvoicePrompt.js`: `compact` là bản ngắn mặc định và `detailed` là bản đầy đủ. Cả hai giữ nguyên quy tắc đơn vị/quy cách. Fallback prompt chỉ kích hoạt khi response rỗng, JSON lỗi hoặc sai schema; backend không thể tự phát hiện một giá trị sai về nghiệp vụ nhưng vẫn hợp lệ về schema, nên các trường hợp đó vẫn cần người dùng kiểm tra hoặc thực nghiệm A/B.
+
+ShopAIKey là bên trung gian xử lý request, không phải quota Google AI Studio của bạn. Kiểm tra gói có đúng model, hỗ trợ ảnh và structured JSON; lưu tên gateway trong phương pháp thực nghiệm. Dùng tên lượt riêng `gemini-26-shopaikey`, không trộn với `gemini-26` đã gọi trực tiếp Google. Xem [hướng dẫn SDK của nhà cung cấp](https://shopaikey.com/docs/google-genai).
+
+Kiểm thử cấu hình offline, không gửi ảnh hay trừ credit: `cd backend`, rồi `npm.cmd run test:gemini-config`.
+
+Kiểm tra kết nối thật (gửi một yêu cầu văn bản ngắn, có thể tính credit): `node scripts/test-gemini-connection.js`. Để áp dụng key `.env` cho tài khoản đã tồn tại, chạy `node scripts/test-gemini-connection.js --connect-user 12` (thay 12 bằng đúng user_id). Lệnh này chỉ thay cấu hình kết nối Gemini sau khi kiểm tra thành công, không tạo hóa đơn hoặc mapping. Không truyền key qua command line.
+
 ## Multi-page invoice flow
 
 1. **Nhập hàng** → **Bắt đầu nhập phiên hóa đơn**.
@@ -68,13 +118,14 @@ Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, st
 {
   "supplier": { "name": null, "phone": null, "address": null, "tax_code": null },
   "invoice": { "number": null, "date": null },
-  "items": [{ "name": null, "quantity": null, "unit": null, "unit_price": null, "total_price": null }],
+    "items": [{ "name": null, "quantity": null, "unit": null, "package_quantity": null, "package_unit": null, "unit_price": null, "price_unit": null, "total_price": null, "line_type": "PRODUCT", "line_status": "ACTIVE", "status_reason": null }],
+    "promotions": [],
   "total_amount": null
 }
 ```
 
 5. The application scopes supplier/product mapping to the logged-in account. Product autocomplete searches product names, codes, and external names with a debounce.
-6. **Sửa hóa đơn** calculates each line, subtotal, discount, and payment total in the browser; the backend validates and recalculates them again.
+6. **Sửa hóa đơn** giữ riêng số lượng/đơn giá/thành tiền OCR và dữ liệu sẽ sử dụng. Nếu đơn giá áp dụng theo đơn vị con, SAPI dùng thành tiền OCR để chuẩn hóa đơn giá theo đơn vị số lượng mà không sửa JSON gốc. Dòng `CANCELLED` bị loại khỏi nhập hàng; dòng `UNCERTAIN` được tô cảnh báo. Khuyến mại không phải hàng tồn kho hiển thị riêng. Backend vẫn kiểm tra và tính lại dữ liệu sử dụng.
 7. Only **Xác nhận hóa đơn** creates `purchaseinvoice` and `purchaseinvoiceitem`, updates mapping where applicable, marks the session confirmed, and deletes temporary image files.
 
 ### Mapping and KiotViet source of truth
@@ -100,7 +151,9 @@ The red text on **Tải ảnh hóa đơn** is the next action. Also look at the 
 | --- | --- |
 | `Gemini chưa được cấu hình…` | Put a non-empty `GEMINI_API_KEY` in `backend/.env`, then **restart** the server. |
 | `GEMINI_API_KEY sai hoặc không có quyền…` | Create a new key in [Google AI Studio](https://aistudio.google.com/app/apikey), paste it into `backend/.env` with no quotes/spaces, restart. Enable the Generative Language API if asked. |
-| `Model Gemini không tồn tại…` | In `backend/.env` set `GEMINI_MODEL=gemini-2.0-flash` (or another model your key can use), restart. Default `gemini-2.5-flash` is not available on every key. |
+| `Model Gemini không tồn tại…` | Check the configured endpoint and the key's model group. Keep `GEMINI_MODEL` / `GEMINI_FALLBACK_MODEL` set to models the key can use, then restart. |
+| `API không đủ credit…` | Check the balance/billing at the configured provider. Gateway credit is not Google Cloud credit. |
+| `Endpoint đang dùng gateway nhưng tài khoản vẫn lưu key Google…` | Reconnect that account using the gateway key. Updating `.env` alone does not replace the account's encrypted key. |
 | `Gemini bị giới hạn quota/rate limit…` | Wait and retry. Check quota/billing in Google AI Studio. |
 | `Gemini hết thời gian chờ…` / terminal `This operation was aborted` | The HTTP client cancelled the call (default used to be 30s). Set `GEMINI_TIMEOUT_MS=120000` in `backend/.env`, **restart**, retry. Keep the upload tab open until Gemini finishes. |
 | `Gemini trả về JSON không hợp lệ` / `không đúng schema` | Extraction failed validation. Retry; do not invent data. Edit the prompt only in `backend/services/geminiInvoicePrompt.js`. |
@@ -112,15 +165,41 @@ Do not commit `backend/.env`. If the message is still unclear, copy the **on-scr
 
 ## Project layout
 
+### Thực nghiệm trích xuất Gemini
+
+Hướng dẫn script chạy tuần tự 26 ảnh, lưu JSON từng ảnh, tiếp tục lượt dở và xuất PDF/CSV đánh giá thủ công: [Thực nghiệm Gemini](docs/GEMINI_EXTRACTION_EXPERIMENT.md). Lệnh `experiment:gemini -- run` mới gọi API thật; plan, users, images và report không gọi Gemini. Script không ghi DB hoặc gửi KiotViet.
+
 - `backend/server.js` — Express API + static frontend
 - `backend/services/geminiInvoicePrompt.js` — Gemini prompt (edit here)
+- `backend/services/geminiClient.js` — shared server-side Gemini endpoint/client and secret redaction
 - `backend/services/geminiInvoiceService.js` — Gemini call + schema validation
 - `backend/services/invoiceMappingService.js` — application mapping stub
 - `backend/services/testInvoiceImageService.js` — loads `test_images/01`
 - `frontend/upload-invoice.html` — test upload + preview
 - `frontend/invoice-correction.html` — correction UI
 
-## KiotViet
+## Cài đặt và hiệu chỉnh hóa đơn
+
+- Nút bánh răng trên navbar mở **Cài đặt**: cỡ chữ Nhỏ / Mặc định / Lớn và đổi mật khẩu. Cỡ chữ áp dụng ngay, lưu bằng `localStorage` trên trình duyệt hiện tại. Không lặp lại cấu hình kết nối trên navbar.
+- Đổi mật khẩu cần mật khẩu hiện tại, mật khẩu mới (ít nhất 8 ký tự, tối đa 72 byte UTF-8) và xác nhận trùng khớp. Backend băm bằng bcrypt, giữ phiên hiện tại và đăng xuất các phiên khác của tài khoản. Endpoint: `PUT /api/auth/password`.
+- Trang sửa hóa đơn có nút **Xóa** trên từng dòng, kèm modal xác nhận. Sau khi xóa, STT và tổng tiền cập nhật; dòng bị xóa không nằm trong payload xác nhận, không tạo mapping hoặc gửi KiotViet. JSON OCR gốc vẫn được giữ để đối chiếu.
+- Không thể xác nhận hóa đơn rỗng, số lượng/đơn giá chưa điền hoặc chiết khấu lớn hơn tổng tiền hàng.
+- Thông báo thành công ngắn dùng toast; lỗi cần xử lý được giữ trong trang; thao tác hủy/xóa dùng modal. Các helper trong `frontend/app.js` không phụ thuộc JavaScript của Tabler/Bootstrap.
+- Prompt phân biệt danh mục mẫu không dùng, hàng viết bổ sung và hàng bị gạch/sửa. Không thêm matching, không thay schema JSON hoặc schema database. Cần kiểm tra kết quả thực tế trên các mẫu đặc biệt; prompt không bảo đảm AI đọc đúng mọi ảnh.
+
+### Kiểm thử các thay đổi
+
+Chạy trong thư mục `backend`:
+
+```powershell
+node scripts/test-password-and-validation.js
+```
+
+Bài test này dùng database double trong bộ nhớ, không thay mật khẩu hay dữ liệu thật. Bài kiểm thử trình duyệt `scripts/test-correction-settings.js` cần một bản cài Playwright và Microsoft Edge, cùng kết nối để tải CSS Tabler; có thể đặt `NODE_PATH` tới thư mục chứa package Playwright có sẵn rồi chạy `node scripts/test-correction-settings.js`. Nó dùng fixture API tách biệt, không gọi Gemini hay KiotViet. Có thể đặt `SAPI_TEST_BROWSER=chrome` nếu dùng Chrome thay Edge.
+
+Để thử OCR thật: restart backend sau khi sửa prompt, mở phiên mới, upload ảnh, bấm **Gửi ảnh**, kiểm tra kết quả và thử xóa dòng trước khi xác nhận. Không bấm xác nhận trên gian hàng thật chỉ để kiểm thử, vì thao tác này có thể tạo phiếu nhập KiotViet. Checklist mẫu thử nằm trong `docs/CHUAN_BI_SUA.md`.
+
+## Chế độ KiotViet
 
 `KIOTVIET_MODE=live` (default) uses both the real OAuth endpoint and the real Public API. `KIOTVIET_MODE=mock` uses both token and data endpoints from the local mock; the two modes are never mixed.
 

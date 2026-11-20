@@ -38,6 +38,8 @@
     let selectedFiles = [];
     let uploadedImages = [];
     let pollTimer = null;
+    let uploading = false;
+    let processingRequested = false;
     const requestedSession = new URLSearchParams(location.search).get('session');
 
     async function api(url, options = {}) {
@@ -56,7 +58,7 @@
         const label = document.createElement('div'); label.className = 'card-body p-2 text-truncate'; label.textContent = file.name;
         card.append(image, label); previewGrid.append(card);
       });
-      uploadButton.disabled = !sessionToken || !selectedFiles.length;
+      uploadButton.disabled = uploading || processingRequested || !canManageImages() || !sessionToken || !selectedFiles.length;
     }
     function canManageImages() { return ['WAITING_IMAGES', 'UPLOADING', 'READY_TO_PROCESS', 'FAILED'].includes(document.body.dataset.sessionStatus); }
     function renderUploadedImages() {
@@ -79,6 +81,7 @@
       uploadedImages = detail.images || []; renderUploadedImages();
     }
     async function deleteImage(imageId) {
+      if (!await SapiUI.confirmAction('Xóa trang ảnh này khỏi phiên? Bạn có thể tải lại ảnh trước khi xử lý.', { title: 'Xóa ảnh hóa đơn', confirmLabel: 'Xóa ảnh' })) return;
       try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images/${imageId}`, { method: 'DELETE' }); await loadUploadedImages(); await refreshStatus(); }
       catch (error) { showStatus(error.message, 'danger'); }
     }
@@ -92,10 +95,13 @@
       try {
         const state = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/status`);
         document.body.dataset.sessionStatus = state.status; renderUploadedImages();
-        processButton.disabled = state.imageCount < 1 || state.status === 'PROCESSING';
-        if (state.status === 'PROCESSING') showStatus(`Gemini đang xử lý ${state.imageCount} trang…`);
+        processButton.disabled = uploading || processingRequested || state.imageCount < 1 || !['READY_TO_PROCESS', 'FAILED'].includes(state.status);
+        const processing = state.status === 'PROCESSING';
+        processButton.innerHTML = processing ? '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang xử lý…' : state.status === 'FAILED' ? 'Thử lại' : 'Gửi ảnh';
+        input.disabled = uploading || processingRequested || !canManageImages(); document.querySelector('#choose-again').disabled = input.disabled; uploadButton.disabled = uploading || processingRequested || !canManageImages() || !selectedFiles.length;
+        if (state.status === 'PROCESSING') showStatus(`Đang xử lý ${state.imageCount} trang…`);
         else if (state.status === 'READY_FOR_REVIEW') { clearInterval(pollTimer); location.href = `/invoice-correction.html?session=${encodeURIComponent(sessionToken)}`; }
-        else if (state.status === 'FAILED') showStatus(state.error || 'Xử lý thất bại. Bạn có thể bấm Gửi ảnh để thử lại.', 'danger');
+        else if (state.status === 'FAILED') showStatus(`${state.error || 'Xử lý thất bại.'} Ảnh vẫn được giữ trong phiên; bạn có thể kiểm tra, thay ảnh hoặc bấm Thử lại.`, 'danger');
         else showStatus(`Phiên hiện có ${state.imageCount} trang đã upload. ${state.imageCount ? 'Bạn có thể thêm trang hoặc bấm Gửi ảnh.' : 'Đang chờ ảnh từ PC hoặc điện thoại.'}`);
       } catch (error) { showStatus(error.message, 'danger'); }
     }
@@ -126,17 +132,21 @@
     input.addEventListener('change', () => { selectedFiles = Array.from(input.files); renderLocalPreviews(); });
     document.querySelector('#choose-again').addEventListener('click', () => { input.value = ''; selectedFiles = []; renderLocalPreviews(); input.click(); });
     uploadButton.addEventListener('click', async () => {
-      uploadButton.disabled = true;
+      if (uploading || processingRequested) return;
+      uploading = true; uploadButton.disabled = true; processButton.disabled = true; input.disabled = true; document.querySelector('#choose-again').disabled = true;
       try {
         const form = new FormData(); selectedFiles.forEach((file) => form.append('invoiceImages', file));
         const result = await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/images`, { method: 'POST', body: form });
         selectedFiles = []; input.value = ''; renderLocalPreviews(); showStatus(`Đã upload thêm ${result.added} trang.`, 'success'); await loadUploadedImages(); await refreshStatus();
-      } catch (error) { showStatus(error.message, 'danger'); uploadButton.disabled = false; }
+      } catch (error) { showStatus(error.message, 'danger'); }
+      finally { uploading = false; input.disabled = !canManageImages(); document.querySelector('#choose-again').disabled = input.disabled; renderLocalPreviews(); processButton.disabled = !uploadedImages.length || !canManageImages(); }
     });
     processButton.addEventListener('click', async () => {
-      processButton.disabled = true;
-      try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/process`, { method: 'POST' }); showStatus('Gemini đang xử lý toàn bộ các trang…'); await refreshStatus(); }
+      if (uploading || processingRequested) return;
+      processingRequested = true; processButton.disabled = true; uploadButton.disabled = true;
+      try { await api(`/api/invoice-sessions/${encodeURIComponent(sessionToken)}/process`, { method: 'POST' }); showStatus('Đang xử lý toàn bộ các trang…'); await refreshStatus(); }
       catch (error) { showStatus(error.message, 'danger'); await refreshStatus(); }
+      finally { processingRequested = false; }
     });
     createSession();
   </script>

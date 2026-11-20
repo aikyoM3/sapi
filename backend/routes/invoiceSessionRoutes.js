@@ -3,14 +3,14 @@ const fs = require('fs/promises');
 const express = require('express');
 const multer = require('multer');
 const QRCode = require('qrcode');
-const { extractInvoiceFromImages, GeminiInvoiceError } = require('../services/geminiInvoiceService');
+const { extractInvoiceFromImagesDetailed } = require('../services/geminiInvoiceService');
 const { mapExtractedInvoice } = require('../services/invoiceMappingService');
 const { saveTemporaryImage, removeTemporaryImages } = require('../services/imageFileService');
 const { requireAuth, currentUserId } = require('../middleware/auth');
 const { getMobileBaseUrl } = require('../services/lanAddress');
 const { loadConnectionConfig } = require('../services/kiotVietConnectionService');
 const { buildPurchaseOrderPayload, createPurchaseOrder } = require('../kiotviet');
-const { loadGeminiApiKey } = require('../services/geminiConnectionService');
+const { loadGeminiConnection } = require('../services/geminiConnectionService');
 
 const router = express.Router();
 const upload = multer({
@@ -22,6 +22,7 @@ const SESSION_HOURS = 12;
 const token = () => crypto.randomBytes(32).toString('base64url');
 const safeText = (value, max = 255) => String(value || '').trim().slice(0, max);
 const nonNegative = (value, field) => {
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim()) || !['string', 'number'].includes(typeof value)) throw Object.assign(new Error(`${field} chưa được điền.`), { statusCode: 400 });
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) throw Object.assign(new Error(`${field} không hợp lệ.`), { statusCode: 400 });
   return number;
@@ -82,11 +83,15 @@ async function processSession(pool, session) {
       [session.invoice_session_id],
     );
     const files = await Promise.all(rows.map(async (image) => ({ mimetype: image.mime_type, buffer: await fs.readFile(image.image_path) })));
-    const buyerResult = await pool.query('SELECT store_name, tax_code, address, phone, email FROM users WHERE user_id=$1', [session.user_id]);
-    const gemini = await extractInvoiceFromImages(files, { apiKey: await loadGeminiApiKey(pool, session.user_id), buyer: buyerResult.rows[0] || {} });
+    const buyer = (await pool.query('SELECT store_name, tax_code, address, phone, email FROM users WHERE user_id=$1', [session.user_id])).rows[0] || {};
+    const details = await extractInvoiceFromImagesDetailed(files, {
+      connection: await loadGeminiConnection(pool, session.user_id),
+      buyer,
+    });
+    const gemini = details.invoice;
     const corresponding = await mapExtractedInvoice(pool, gemini, session.user_id);
     await pool.query(
-      "UPDATE invoicesession SET status = 'READY_FOR_REVIEW', ocr_result = $1, error_message = NULL, updated_at = NOW() WHERE invoice_session_id = $2 AND status = 'PROCESSING'",
+      "UPDATE invoicesession SET status='READY_FOR_REVIEW', ocr_result=$1, error_message=NULL, updated_at=NOW() WHERE invoice_session_id=$2 AND status='PROCESSING'",
       [JSON.stringify({ gemini, corresponding }), session.invoice_session_id],
     );
   } catch (error) {
@@ -254,10 +259,12 @@ module.exports = function invoiceSessionRoutes(pool) {
       const normalized = items.map((item, index) => ({
         productId: Number(item.productId),
         externalName: safeText(item.externalName),
+        externalUnit: safeText(item.externalUnit, 100) || null,
         quantity: nonNegative(item.quantity, `Số lượng dòng ${index + 1}`),
         unit: safeText(item.unit, 100) || null,
         unitPrice: nonNegative(item.unitPrice, `Đơn giá dòng ${index + 1}`),
       }));
+      if (normalized.some((item) => item.quantity <= 0)) throw Object.assign(new Error('Số lượng mỗi dòng phải lớn hơn 0.'), { statusCode: 400 });
       if (normalized.some((item) => !Number.isInteger(item.productId) || item.productId <= 0)) throw Object.assign(new Error('Mỗi dòng phải chọn một hàng hóa tương ứng.'), { statusCode: 400 });
       const discount = nonNegative(req.body.discountAmount || 0, 'Chiết khấu');
 
@@ -325,9 +332,9 @@ module.exports = function invoiceSessionRoutes(pool) {
           [invoice.rows[0].invoice_id, item.productId, item.quantity, item.unit, item.unitPrice, item.quantity * item.unitPrice],
         );
         if (item.externalName) {
-          const mapping = await client.query('SELECT mapping_id FROM productmapping WHERE supplier_id = $1 AND LOWER(provider_product_name) = LOWER($2) LIMIT 1', [supplierId, item.externalName]);
-          if (mapping.rowCount) await client.query('UPDATE productmapping SET local_product_id = $1, local_unit = $2 WHERE mapping_id = $3', [item.productId, item.unit, mapping.rows[0].mapping_id]);
-          else await client.query('INSERT INTO productmapping (supplier_id, local_product_id, provider_product_name, local_unit) VALUES ($1, $2, $3, $4)', [supplierId, item.productId, item.externalName, item.unit]);
+          const mapping = await client.query("SELECT mapping_id FROM productmapping WHERE supplier_id = $1 AND LOWER(provider_product_name) = LOWER($2) AND LOWER(COALESCE(provider_unit,'')) = LOWER(COALESCE($3,'')) LIMIT 1", [supplierId, item.externalName, item.externalUnit]);
+          if (mapping.rowCount) await client.query('UPDATE productmapping SET local_product_id = $1, provider_unit = $2, local_unit = $3 WHERE mapping_id = $4', [item.productId, item.externalUnit, item.unit, mapping.rows[0].mapping_id]);
+          else await client.query('INSERT INTO productmapping (supplier_id, local_product_id, provider_product_name, provider_unit, local_unit) VALUES ($1, $2, $3, $4, $5)', [supplierId, item.productId, item.externalName, item.externalUnit, item.unit]);
         }
       }
       const externalSupplierName = safeText(session.ocr_result?.gemini?.supplier?.name);
