@@ -53,6 +53,9 @@ async function main() {
     await secondProduct.press('ArrowDown'); await secondProduct.press('Enter');
     assert.equal(await secondProduct.inputValue(), 'New Product');
     assert.equal(await page.locator('.line-unit').nth(1).inputValue(), 'Hộp');
+    await page.locator('#invoice-number').fill('DRAFT-01'); await page.waitForTimeout(850); await page.reload();
+    await page.locator('.invoice-line').nth(1).waitFor(); assert.equal(await page.locator('#invoice-number').inputValue(), 'DRAFT-01');
+    assert.equal(await page.locator('.product-name').nth(1).inputValue(), 'New Product'); assert((await page.locator('#draft-status').textContent()).includes('khôi phục'));
     const original = await page.locator('#gemini-json').textContent();
     await page.locator('.delete-line').nth(1).click();
     await page.keyboard.press('Escape');
@@ -71,6 +74,7 @@ async function main() {
     await page.locator('#confirm').click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('Đã lưu hóa đơn'));
     assert.equal(confirmationRequests, 1); assert.equal(confirmed.items.length, 1); assert.equal(confirmed.items[0].productId, 11); assert.equal(confirmed.items[0].externalName, 'Retained');
+    assert.equal(await page.evaluate(() => localStorage.getItem('sapi:invoice-draft:test')), null);
     await page.goto(base + '/invoice-correction.html?session=test');
     await page.locator('.delete-line').nth(1).waitFor();
     for (let index = 0; index < 2; index++) { await page.locator('.delete-line').first().click(); await page.locator('[data-accept]').click(); }
@@ -107,7 +111,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#process').textContent.includes('Đang xử lý'));
     assert.equal(retryRequests, 1); assert(await page.locator('#process').isDisabled()); assert(await page.locator('#image-input').isDisabled());
     assert.deepEqual(pageErrors, []);
-    console.log('PASS: keyboard product selection/unit autofill, hidden product code, delete/cancel, totals/discount, unchanged OCR JSON, confirmation payload, empty/missing data, toast, font persistence, password feedback, modal Escape/focus, mobile settings and upload retry/spinner.');
+    console.log('PASS: draft autosave/restore/cleanup, keyboard product selection/unit autofill, hidden product code, delete/cancel, totals/discount, unchanged OCR JSON, confirmation payload, empty/missing data, toast, font persistence, password feedback, modal Escape/focus, mobile settings and upload retry/spinner.');
     await context.close();
   } finally { await browser?.close(); await new Promise((resolve) => server.close(resolve)); }
 }

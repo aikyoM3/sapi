@@ -40,6 +40,7 @@ Do this on a clean machine (or after cloning the repo). One Node process serves 
    | `GEMINI_TIMEOUT_MS` | No | Default `120000` (2 minutes). Vision extraction often exceeds 30s. |
    | `GEMINI_PROMPT_VERSION` | No | `compact` by default; `detailed` selects the retained full prompt |
    | `GEMINI_PROMPT_FALLBACK_ON_INVALID` | No | With `compact`, retry once using `detailed` only for an empty/invalid/schema-invalid response |
+   | `GEMINI_VERIFY_SUSPICIOUS` | No | Mặc định `true`; chỉ đọc kiểm chứng lần hai khi phát hiện lệch cột hoặc mâu thuẫn số học |
    | `PORT` | No | Default `3000` |
    | `DB_*` | No | Only for list pages / optional mapping lookup |
 
@@ -111,7 +112,7 @@ Kiểm tra kết nối thật (gửi một yêu cầu văn bản ngắn, có th�
 ```
 
 5. The application scopes supplier/product mapping to the logged-in account. Product autocomplete searches product names, codes, and external names with a debounce.
-6. **Sửa hóa đơn** giữ riêng số lượng/đơn giá/thành tiền OCR và dữ liệu sẽ sử dụng. Nếu đơn giá áp dụng theo đơn vị con, SAPI dùng thành tiền OCR để chuẩn hóa đơn giá theo đơn vị số lượng mà không sửa JSON gốc. Dòng `CANCELLED` bị loại khỏi nhập hàng; dòng `UNCERTAIN` được tô cảnh báo. Khuyến mại không phải hàng tồn kho hiển thị riêng. Backend vẫn kiểm tra và tính lại dữ liệu sử dụng.
+6. **Sửa hóa đơn** giữ riêng JSON OCR gốc và dữ liệu đã qua kiểm tra để sử dụng. Schema giữ các cột số lượng thô (ví dụ `Thùng`/`Lẻ`); backend kiểm tra quan hệ số lượng–quy cách–đơn giá–thành tiền. Khi phát hiện nghi vấn, hệ thống đọc kiểm chứng lần hai và chỉ áp dụng chuẩn hóa nếu hai lượt nhất quán; nếu khác nhau thì giữ lượt đầu và cảnh báo người dùng. Dòng `CANCELLED` bị loại khỏi nhập hàng; dòng `UNCERTAIN` được tô cảnh báo.
 7. Only **Xác nhận hóa đơn** creates `purchaseinvoice` and `purchaseinvoiceitem`, updates mapping where applicable, marks the session confirmed, and deletes temporary image files.
 
 ### Mapping and KiotViet source of truth
@@ -168,6 +169,7 @@ Hướng dẫn script chạy tuần tự 26 ảnh, lưu JSON từng ảnh, tiế
 - Nút bánh răng trên navbar mở **Cài đặt**: cỡ chữ Nhỏ / Mặc định / Lớn và đổi mật khẩu. Cỡ chữ áp dụng ngay, lưu bằng `localStorage` trên trình duyệt hiện tại. Không lặp lại cấu hình kết nối trên navbar.
 - Đổi mật khẩu cần mật khẩu hiện tại, mật khẩu mới (ít nhất 8 ký tự, tối đa 72 byte UTF-8) và xác nhận trùng khớp. Backend băm bằng bcrypt, giữ phiên hiện tại và đăng xuất các phiên khác của tài khoản. Endpoint: `PUT /api/auth/password`.
 - Trang sửa hóa đơn có nút **Xóa** trên từng dòng, kèm modal xác nhận. Sau khi xóa, STT và tổng tiền cập nhật; dòng bị xóa không nằm trong payload xác nhận, không tạo mapping hoặc gửi KiotViet. JSON OCR gốc vẫn được giữ để đối chiếu.
+- Mọi thay đổi trên trang sửa hóa đơn được tự lưu vào `localStorage` theo phiên sau khoảng 700 ms và khi rời tab. Mở lại đúng phiên trên cùng trình duyệt sẽ khôi phục nhà cung cấp, hàng đã chọn, các giá trị đã sửa và cả các dòng đã xóa; bản nháp bị xóa sau khi xác nhận thành công.
 - Thuế có thể nhập theo `%` hoặc `VND`; SAPI lưu riêng và phân bổ vào đơn giá dòng khi gửi KiotViet. Tiền trả nhà cung cấp được gửi qua `paidAmount`; số hóa đơn được dùng làm mã phiếu KiotViet khi có. Giới hạn và cách trình bày trong báo cáo được ghi tại `docs/KIOTVIET_TAX_LIMITATION.md`.
 - Danh sách hóa đơn hỗ trợ chọn và xóa hàng loạt các phiên/hóa đơn chưa đồng bộ; hóa đơn đã đồng bộ không bị xóa cục bộ để tránh mất liên kết với KiotViet.
 - Không thể xác nhận hóa đơn rỗng, số lượng/đơn giá chưa điền hoặc chiết khấu lớn hơn tổng tiền hàng.

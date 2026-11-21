@@ -7,6 +7,7 @@ const detailedInvoiceExtractionPrompt = `Bạn là hệ thống trích xuất d�
 Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và trả về DUY NHẤT một JSON object theo schema sau:
 
 {
+  "layout_type": "SINGLE_UNIT_COLUMN" | "SPLIT_QUANTITY_COLUMNS" | "FREE_FORM" | "UNKNOWN",
   "supplier": {
     "name": string | null,
     "phone": string | null,
@@ -20,6 +21,10 @@ Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và tr�
   "items": [
     {
       "name": string | null,
+      "raw_unit_column": string | null,
+      "quantity_cells": [
+        { "sub_header": string | null, "value": number | null }
+      ],
       "quantity": number | null,
       "unit": string | null,
       "package_quantity": number | null,
@@ -94,6 +99,9 @@ D. Trạng thái dòng:
 Sau khi phân loại các dòng giao dịch, tạo một object cho mỗi mục, kể cả dòng CANCELLED/UNCERTAIN cần giữ làm dấu vết:
 
 - name: tên hàng hóa được ghi trên hóa đơn.
+- layout_type mô tả bố cục chung: SINGLE_UNIT_COLUMN khi có cột ĐVT riêng; SPLIT_QUANTITY_COLUMNS khi vùng số lượng chia thành nhiều cột có tiêu đề đơn vị; FREE_FORM với phiếu viết tự do; UNKNOWN khi không chắc.
+- raw_unit_column: nội dung ô ĐVT riêng của dòng. Nếu đơn vị chỉ nằm trong tiêu đề con của vùng số lượng thì để null.
+- quantity_cells: giữ TẤT CẢ cột số lượng nhìn thấy của dòng theo thứ tự trái sang phải, gồm đúng tiêu đề con và value; ô trống phải có value=null. Với cột số lượng đơn không có tiêu đề con, vẫn trả một phần tử với sub_header=null. Không gộp các cột trước khi trả.
 - quantity: số lượng.
 - unit: lấy từ nhãn hoặc tiêu đề gắn với chính ô quantity. Khi vùng số lượng có nhiều cột con theo đơn vị, lần theo đường kẻ/căn chỉnh tới tiêu đề của ô có số; không lấy tiêu đề cột bên cạnh hoặc đơn vị áp dụng cho giá.
 - Tự nhận diện quy cách từ nhãn, tiêu đề, cột và cấu trúc bảng. Chỉ đặt package_quantity khi chứng từ thể hiện rõ một hệ số đóng gói/quy đổi; chỉ đặt package_unit khi đơn vị con đi kèm hệ số được thể hiện rõ.
@@ -153,7 +161,7 @@ Không thực hiện supplier mapping.
 - Các giá trị không xác định phải là null.
 `;
 
-const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như các trang của CÙNG MỘT hóa đơn mua hàng và chỉ trả JSON đúng response schema. Không Markdown, không giải thích, không bịa; thiếu hoặc không chắc thì null, array không có dữ liệu thì [].
+const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như các trang của CÙNG MỘT hóa đơn mua hàng và chỉ trả JSON đúng response schema. Không Markdown, không giải thích, không bịa; thiếu hoặc không chắc thì null, array không có dữ liệu thì []. layout_type là SINGLE_UNIT_COLUMN khi có cột ĐVT riêng, SPLIT_QUANTITY_COLUMNS khi số lượng chia cột đơn vị, FREE_FORM khi viết tự do, nếu không chắc là UNKNOWN.
 
 1. Bên bán và chứng từ
 - supplier là BÊN BÁN, không lấy thông tin người mua/cửa hàng trong ngữ cảnh hệ thống. Giữ nguyên tên, điện thoại, địa chỉ, MST đọc được.
@@ -169,6 +177,7 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 
 3. Giữ nguyên quan hệ số lượng–đơn vị–quy cách–giá
 - name, quantity, unit và unit_price giữ đúng cột/nhãn trên chứng từ. Nếu vùng số lượng có nhiều cột đơn vị, lần theo đường kẻ/căn chỉnh và lấy unit từ tiêu đề của chính ô có số; không dùng tiêu đề cột bên cạnh hay đơn vị giá.
+- raw_unit_column chỉ chứa ô ĐVT riêng; nếu đơn vị nằm ở tiêu đề con của vùng số lượng thì null. quantity_cells phải giữ mọi cột số lượng theo thứ tự trái sang phải dưới dạng {sub_header,value}, kể cả ô trống với value=null; không gộp cột trước khi trả.
 - Tự nhận diện quy cách từ nhãn, tiêu đề, cột và cấu trúc bảng. Chỉ ghi package_quantity khi có hệ số đóng gói/quy đổi rõ và chỉ ghi package_unit khi đơn vị con đi kèm được thể hiện rõ; không có/không chắc thì null.
 - Không tạo quy cách chỉ từ tên sản phẩm, kiến thức sản phẩm, phép tính thành tiền hoặc một con số đứng riêng. price_unit chỉ ghi khi cấu trúc chứng từ thể hiện rõ đơn giá áp dụng cho đơn vị nào.
 - total_price ưu tiên số thành tiền in/viết trên dòng, không ép thành quantity × unit_price. Thành tiền có thể là quantity × package_quantity × unit_price nếu bố cục chứng từ thể hiện quan hệ đó.
@@ -182,7 +191,7 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 5. Ràng buộc
 - Không mapping sản phẩm/nhà cung cấp, không tạo ID/mã, không chuẩn hóa tên sang danh mục.
 - Bỏ quảng cáo, điểm thưởng và thông tin thanh toán không thuộc schema.
-- Trước khi trả JSON, kiểm tra lại: không có dòng mẫu trống; dòng hủy được đánh dấu; unit không bị đổi bởi quy cách; quantity, package factor, unit_price và total_price không bị gộp nhầm.`;
+- Trước khi trả JSON, kiểm tra lại: không có dòng mẫu trống; dòng hủy được đánh dấu; unit không bị đổi bởi quy cách; quantity, package factor, unit_price và total_price không bị gộp nhầm. Khi đủ số liệu, dùng phép tính chỉ để phát hiện khả năng lệch cột; không tự tạo field thiếu hay đổi dữ liệu chỉ để ép tổng khớp.`;
 
 const invoicePrompts = Object.freeze({
   compact: compactInvoiceExtractionPrompt,

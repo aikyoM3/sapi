@@ -1,11 +1,18 @@
 const { createGeminiClient, getGeminiEndpointSettings, redactGeminiSecrets } = require('./geminiClient');
 const { invoiceExtractionPrompt, getInvoicePrompt, getInvoicePromptPlan } = require('./geminiInvoicePrompt');
 
+const LAYOUT_TYPES = ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'];
+
 // This is the application's standardized Gemini response. Do not rename fields without a migration.
 const invoiceSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
+    layout_type: {
+      type: 'string',
+      enum: ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'],
+      description: 'Overall quantity/unit table layout visible in the document.',
+    },
     supplier: {
       type: 'object',
       additionalProperties: false,
@@ -33,6 +40,20 @@ const invoiceSchema = {
         additionalProperties: false,
         properties: {
           name: { type: ['string', 'null'] },
+          raw_unit_column: { type: ['string', 'null'], description: 'Value from a dedicated DVT/unit cell, or null when units are quantity sub-headers.' },
+          quantity_cells: {
+            type: 'array',
+            description: 'Every visible quantity sub-column for this line, preserving empty cells as null.',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                sub_header: { type: ['string', 'null'] },
+                value: { type: ['number', 'null'] },
+              },
+              required: ['sub_header', 'value'],
+            },
+          },
           quantity: { type: ['number', 'null'], description: 'Quantity printed for this line; do not multiply it by the package factor.' },
           unit: { type: ['string', 'null'], description: 'Unit from the label/header aligned with the exact quantity cell; never substitute an adjacent column or price unit.' },
           package_quantity: { type: ['number', 'null'], description: 'Explicit packaging/conversion factor recognized from document labels and layout; null when absent or uncertain.' },
@@ -44,7 +65,7 @@ const invoiceSchema = {
           line_status: { type: 'string', enum: ['ACTIVE', 'CANCELLED', 'UNCERTAIN'] },
           status_reason: { type: ['string', 'null'] },
         },
-        required: ['name', 'quantity', 'unit', 'package_quantity', 'package_unit', 'unit_price', 'price_unit', 'total_price', 'line_type', 'line_status', 'status_reason'],
+        required: ['name', 'raw_unit_column', 'quantity_cells', 'quantity', 'unit', 'package_quantity', 'package_unit', 'unit_price', 'price_unit', 'total_price', 'line_type', 'line_status', 'status_reason'],
       },
     },
     promotions: { type: 'array', items: { type: 'object', additionalProperties: false,
@@ -52,7 +73,7 @@ const invoiceSchema = {
       required: ['description', 'amount'] } },
     total_amount: { type: ['number', 'null'] },
   },
-  required: ['supplier', 'invoice', 'items', 'promotions', 'total_amount'],
+  required: ['layout_type', 'supplier', 'invoice', 'items', 'promotions', 'total_amount'],
 };
 
 class GeminiInvoiceError extends Error {
@@ -195,6 +216,7 @@ function validateInvoice(payload) {
     throw new GeminiInvoiceError('Gemini trả về hóa đơn không đúng schema.');
   }
   return {
+    layout_type: LAYOUT_TYPES.includes(payload.layout_type) ? payload.layout_type : 'UNKNOWN',
     supplier: {
       name: nullableString(payload.supplier.name, 'supplier.name'),
       phone: nullableString(payload.supplier.phone, 'supplier.phone'),
@@ -211,6 +233,11 @@ function validateInvoice(payload) {
       }
       return {
         name: nullableString(item.name, `items[${index}].name`),
+        raw_unit_column: nullableString(item.raw_unit_column ?? null, `items[${index}].raw_unit_column`),
+        quantity_cells: (Array.isArray(item.quantity_cells) ? item.quantity_cells : []).map((cell, cellIndex) => ({
+          sub_header: nullableString(cell?.sub_header ?? null, `items[${index}].quantity_cells[${cellIndex}].sub_header`),
+          value: nullableNumber(cell?.value ?? null, `items[${index}].quantity_cells[${cellIndex}].value`),
+        })),
         quantity: nullableNumber(item.quantity, `items[${index}].quantity`),
         unit: nullableString(item.unit, `items[${index}].unit`),
         package_quantity: nullableNumber(item.package_quantity, `items[${index}].package_quantity`),

@@ -16,7 +16,7 @@
   </head>
   <body><div class="page">
     <header class="navbar"><div class="container-xl"><a class="navbar-brand fw-bold fs-2 text-primary" href="./index.html">SAPI</a><div class="ms-auto d-flex align-items-center gap-3"><span data-account-name class="text-secondary"></span><button data-logout class="btn btn-outline-secondary btn-sm">Đăng xuất</button></div></div></header>
-    <div class="page-wrapper"><div class="page-header"><div class="container-xl"><div class="row align-items-center"><div class="col"><h2 class="page-title">Sửa hóa đơn</h2></div><div class="col-auto btn-list"><button id="view-gemini" class="btn btn-outline-secondary">Xem JSON OCR</button><a id="back-upload" class="btn btn-outline-primary" href="./upload-invoice.html">Phiên ảnh mới</a></div></div></div></div>
+    <div class="page-wrapper"><div class="page-header"><div class="container-xl"><div class="row align-items-center"><div class="col"><h2 class="page-title">Sửa hóa đơn</h2><div id="draft-status" class="text-secondary small" aria-live="polite"></div></div><div class="col-auto btn-list"><button id="view-gemini" class="btn btn-outline-secondary">Xem JSON OCR</button><a id="back-upload" class="btn btn-outline-primary" href="./upload-invoice.html">Phiên ảnh mới</a></div></div></div></div>
       <div class="page-body"><div class="container-xl">
         <div id="notice" class="alert alert-info">Đang tải dữ liệu phiên hóa đơn…</div>
         <div class="card mb-4"><div class="card-header"><h3 class="card-title">Ảnh hóa đơn</h3></div><div id="invoice-images" class="card-body invoice-images"></div></div>
@@ -56,10 +56,62 @@
     let extraction = null;
     let confirming = false;
     let showPackagingDetails = false;
+    let draftReady = false;
+    const draftKey = sessionToken ? `sapi:invoice-draft:${sessionToken}` : null;
     const numberValue = (element) => Math.max(0, Number(element.value) || 0);
     const text = (value) => value === null || value === undefined ? '' : String(value);
     const normalizedUnit = (value) => text(value).trim().toLocaleLowerCase('vi-VN').replace(/\s+/g, ' ');
     const closeNumber = (left, right) => Math.abs(Number(left) - Number(right)) <= Math.max(0.000001, Math.abs(Number(right)) * 0.000001);
+    const extractionFingerprint = () => JSON.stringify((extraction?.gemini?.items || []).map((item) => [item.name, item.quantity, item.unit, item.total_price]));
+    function draftData() {
+      return {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        fingerprint: extractionFingerprint(),
+        supplier: { id: document.querySelector('#supplier-id').value, name: document.querySelector('#supplier-name').value, phone: document.querySelector('#supplier-phone').value, address: document.querySelector('#supplier-address').value },
+        invoiceNumber: document.querySelector('#invoice-number').value,
+        invoiceDate: document.querySelector('#invoice-date').value,
+        discount: document.querySelector('#discount').value,
+        taxMode: document.querySelector('#tax-mode').value,
+        taxValue: document.querySelector('#tax-value').value,
+        paidAmount: document.querySelector('#paid-amount').value,
+        items: [...itemsBody.querySelectorAll('.invoice-line')].map((row) => ({
+          sourceIndex: row.dataset.sourceIndex,
+          productId: row.querySelector('.product-name').dataset.productId,
+          productName: row.querySelector('.product-name').value,
+          quantity: row.querySelector('.line-quantity').value,
+          unit: row.querySelector('.line-unit').value,
+          unitPrice: row.querySelector('.line-price').value,
+          conversionRate: row.dataset.conversionRate,
+        })),
+      };
+    }
+    function saveDraft() {
+      if (!draftReady || !draftKey || confirming) return;
+      try {
+        const draft = draftData(); localStorage.setItem(draftKey, JSON.stringify(draft));
+        document.querySelector('#draft-status').textContent = `Đã tự động lưu lúc ${new Date(draft.savedAt).toLocaleTimeString('vi-VN')}`;
+      } catch { document.querySelector('#draft-status').textContent = 'Không thể tự động lưu bản nháp trên trình duyệt.'; }
+    }
+    const scheduleDraftSave = debounce(saveDraft, 700);
+    function restoreDraft() {
+      if (!draftKey) return false;
+      let draft;
+      try { draft = JSON.parse(localStorage.getItem(draftKey)); } catch { return false; }
+      if (!draft || draft.version !== 1 || draft.fingerprint !== extractionFingerprint() || !Array.isArray(draft.items)) return false;
+      const fields = [['#supplier-id', draft.supplier?.id], ['#supplier-name', draft.supplier?.name], ['#supplier-phone', draft.supplier?.phone], ['#supplier-address', draft.supplier?.address], ['#invoice-number', draft.invoiceNumber], ['#invoice-date', draft.invoiceDate], ['#discount', draft.discount], ['#tax-mode', draft.taxMode], ['#tax-value', draft.taxValue], ['#paid-amount', draft.paidAmount]];
+      fields.forEach(([selector, value]) => { if (value !== undefined && value !== null) document.querySelector(selector).value = value; });
+      const savedByIndex = new Map(draft.items.map((item) => [String(item.sourceIndex), item]));
+      [...itemsBody.querySelectorAll('.invoice-line')].forEach((row) => {
+        const saved = savedByIndex.get(row.dataset.sourceIndex);
+        if (!saved) { row.remove(); return; }
+        const product = row.querySelector('.product-name'); product.value = text(saved.productName); product.dataset.productId = text(saved.productId);
+        row.querySelector('.line-quantity').value = text(saved.quantity); row.querySelector('.line-unit').value = text(saved.unit); row.querySelector('.line-price').value = text(saved.unitPrice); row.dataset.conversionRate = text(saved.conversionRate);
+      });
+      document.querySelector('#supplier-selection-status').textContent = draft.supplier?.id ? `Đã khôi phục lựa chọn: ${text(draft.supplier.name)}.` : 'Đã khôi phục tên đang nhập; hãy chọn nhà cung cấp từ danh sách gợi ý.';
+      document.querySelector('#draft-status').textContent = `Đã khôi phục bản nháp lưu lúc ${new Date(draft.savedAt).toLocaleString('vi-VN')}`;
+      return true;
+    }
     function initialUsedPrice(item, mapped) {
       const quantity = Number(mapped?.quantity ?? item.quantity); const total = Number(item.total_price); const price = Number(mapped?.unit_price ?? item.unit_price);
       if (quantity > 0 && item.total_price !== null && item.total_price !== undefined && Number.isFinite(total) && total >= 0
@@ -118,13 +170,13 @@
     function createInput(className, value, type = 'text') { const input = document.createElement('input'); input.className = `form-control ${className}`; input.type = type; input.value = text(value); if (type === 'number') { input.min = '0'; input.step = '0.01'; } return input; }
     function td(content, className = '') { const cell = document.createElement('td'); cell.className = className; if (content instanceof HTMLElement) cell.append(content); else cell.textContent = text(content); return cell; }
     function addItem(item, mapped, index) {
-      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit); row.dataset.externalQuantity = text(item.quantity); row.dataset.externalTotal = text(item.total_price); row.dataset.conversionRate = text(mapped?.conversion_rate);
+      const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.sourceIndex = text(index); row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit); row.dataset.externalQuantity = text(item.quantity); row.dataset.externalTotal = text(item.total_price); row.dataset.conversionRate = text(mapped?.conversion_rate);
       if (item.line_status === 'UNCERTAIN') row.classList.add('table-warning');
       const productWrap = document.createElement('div'); productWrap.className = 'suggestion-wrap';
       const productInput = createInput('product-name', mapped?.name); productInput.dataset.productId = text(mapped?.product_id);
       productInput.addEventListener('input', () => { productInput.dataset.productId = ''; productInput.classList.remove('is-invalid'); row.dataset.conversionRate = ''; });
       const suggestions = document.createElement('div'); suggestions.className = 'suggestions'; productWrap.append(productInput, suggestions);
-      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; productInput.classList.remove('is-invalid'); row.dataset.conversionRate = ''; row.querySelector('.line-unit').value = text(product.primary_unit); });
+      buildSuggestions(productInput, suggestions, '/api/products/search', (product) => { productInput.value = product.product_name; productInput.dataset.productId = product.product_id; productInput.classList.remove('is-invalid'); row.dataset.conversionRate = ''; row.querySelector('.line-unit').value = text(product.primary_unit); scheduleDraftSave(); });
       const usedPrice = initialUsedPrice(item, mapped); const normalized = item.total_price != null && item.quantity > 0 && Number(item.unit_price) * Number(item.quantity) !== Number(item.total_price);
       const details = [item.package_quantity && `${item.package_quantity} ${text(item.package_unit)}`.trim(), item.price_unit && `Giá theo ${item.price_unit}`, normalized && 'Đơn giá sử dụng đã quy đổi theo thành tiền', item.line_type === 'PROMOTION_ITEM' && 'Hàng khuyến mại', item.line_status === 'UNCERTAIN' && `Cần kiểm tra: ${text(item.status_reason)}`].filter(Boolean).join(' · ');
       const detailsCell = td(details, showPackagingDetails ? '' : 'd-none');
@@ -133,7 +185,7 @@
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-sm btn-outline-danger delete-line'; remove.textContent = 'Xóa'; remove.setAttribute('aria-label', `Xóa dòng ${index + 1}: ${text(item.name)}`);
       remove.addEventListener('click', async () => {
         if (confirming || !await SapiUI.confirmAction(`Loại “${text(item.name) || 'dòng hàng này'}” khỏi hóa đơn? Hàng trong danh mục và JSON OCR gốc không bị xóa.`, { title: 'Xóa dòng hàng', confirmLabel: 'Xóa dòng' }) || confirming) return;
-        row.remove(); updateTotals(); SapiUI.notify('Đã xóa dòng khỏi hóa đơn.');
+        row.remove(); updateTotals(); scheduleDraftSave(); SapiUI.notify('Đã xóa dòng khỏi hóa đơn.');
       });
       row.append(td(remove, 'text-center')); itemsBody.append(row);
       row.querySelectorAll('input').forEach((input) => input.setAttribute('aria-label', `${input.classList.contains('product-name') ? 'Hàng hóa tương ứng' : input.classList.contains('line-quantity') ? 'Số lượng sử dụng' : input.classList.contains('line-unit') ? 'Đơn vị sử dụng' : 'Đơn giá sử dụng'} dòng ${index + 1}`));
@@ -221,6 +273,7 @@
       document.querySelector('#supplier-phone').value = text(supplier.phone_number ?? supplier.phone);
       document.querySelector('#supplier-address').value = text(supplier.address);
       document.querySelector('#supplier-selection-status').textContent = `Đã chọn: ${text(supplierName)}.`;
+      scheduleDraftSave();
     }
     async function resolveSupplierSelection(mappedSupplier, readSupplier) {
       if (Number(mappedSupplier?.supplier_id)) { selectSupplier(mappedSupplier); return; }
@@ -247,15 +300,17 @@
       showPackagingDetails = (gemini.items || []).some((item) => item.package_quantity !== null && item.package_quantity !== undefined || text(item.package_unit) || text(item.price_unit));
       document.querySelector('#packaging-header').classList.toggle('d-none', !showPackagingDetails); document.querySelector('#table-subtotal-label').colSpan = showPackagingDetails ? 11 : 10;
       (gemini.items || []).forEach((item, index) => { if ((item.line_status || 'ACTIVE') !== 'CANCELLED') addItem(item, mapped.items?.[index], index); });
+      const sanityRows = new Set((extraction.sanity?.issues || []).filter((issue) => issue.severity === 'warning' && Number.isInteger(issue.item_index)).map((issue) => String(issue.item_index))); [...itemsBody.querySelectorAll('.invoice-line')].forEach((row) => row.classList.toggle('table-warning', row.classList.contains('table-warning') || sanityRows.has(row.dataset.sourceIndex)));
       const cancelled = (gemini.items || []).filter((item) => item.line_status === 'CANCELLED'); const uncertain = (gemini.items || []).filter((item) => item.line_status === 'UNCERTAIN'); const promotions = gemini.promotions || []; const audit = document.querySelector('#ocr-audit');
-      const notes = []; if (cancelled.length) notes.push(`Đã loại ${cancelled.length} dòng bị gạch/hủy: ${cancelled.map((item) => text(item.name)).join(', ')}`); if (uncertain.length) notes.push(`${uncertain.length} dòng chưa chắc chắn được tô vàng; hãy kiểm tra hoặc xóa.`); if (promotions.length) notes.push(`Khuyến mại/điều chỉnh đọc được: ${promotions.map((p) => `${text(p.description)}${p.amount == null ? '' : ` (${money.format(p.amount)})`}`).join('; ')}`); audit.textContent = notes.join('\n'); audit.style.whiteSpace = 'pre-line'; audit.classList.toggle('d-none', !notes.length);
+      const notes = []; if (cancelled.length) notes.push(`Đã loại ${cancelled.length} dòng bị gạch/hủy: ${cancelled.map((item) => text(item.name)).join(', ')}`); if (uncertain.length) notes.push(`${uncertain.length} dòng chưa chắc chắn được tô vàng; hãy kiểm tra hoặc xóa.`); if (promotions.length) notes.push(`Khuyến mại/điều chỉnh đọc được: ${promotions.map((p) => `${text(p.description)}${p.amount == null ? '' : ` (${money.format(p.amount)})`}`).join('; ')}`); if (extraction.sanity?.issues?.length) notes.push(...extraction.sanity.issues.map((issue) => `Kiểm tra: ${text(issue.message)}`)); audit.textContent = notes.join('\n'); audit.style.whiteSpace = 'pre-line'; audit.classList.toggle('d-none', !notes.length);
       const imageBox = document.querySelector('#invoice-images'); payload.images.forEach((image) => { const figure = document.createElement('figure'); const img = document.createElement('img'); img.src = image.url; img.alt = `Trang ${image.pageNumber}`; const caption = document.createElement('figcaption'); caption.className = 'text-center mt-2'; caption.textContent = `Trang ${image.pageNumber}`; figure.append(img, caption); imageBox.append(figure); });
-      document.querySelector('#gemini-json').textContent = JSON.stringify(gemini, null, 2); document.querySelector('#notice').className = 'alert alert-info'; document.querySelector('#notice').textContent = 'Kiểm tra dữ liệu OCR, chọn hàng hóa tương ứng rồi xác nhận. Thành tiền được tính từ SL sử dụng × Đơn giá.'; updateTotals();
+      document.querySelector('#gemini-json').textContent = JSON.stringify(extraction.raw_gemini || gemini, null, 2); const restored = restoreDraft(); draftReady = true; document.querySelector('#notice').className = restored ? 'alert alert-warning' : 'alert alert-info'; document.querySelector('#notice').textContent = restored ? 'Đã khôi phục dữ liệu bạn sửa dở. Hãy kiểm tra lại trước khi xác nhận.' : 'Kiểm tra dữ liệu OCR, chọn hàng hóa tương ứng rồi xác nhận. Thành tiền được tính từ SL sử dụng × Đơn giá.'; updateTotals();
     }
     buildSuggestions(document.querySelector('#supplier-name'), document.querySelector('#supplier-suggestions'), '/api/suppliers/search', selectSupplier, { minimumQueryLength: 0, openOnFocus: true });
-    document.querySelector('#supplier-name').addEventListener('input', () => { document.querySelector('#supplier-id').value = ''; document.querySelector('#supplier-name').classList.remove('is-invalid'); document.querySelector('#supplier-phone').value = ''; document.querySelector('#supplier-address').value = ''; document.querySelector('#supplier-selection-status').textContent = 'Chưa chọn: hãy chọn một kết quả trong danh sách gợi ý.'; });
-    itemsBody.addEventListener('input', updateTotals); document.querySelector('#discount').addEventListener('input', updateTotals); document.querySelector('#tax-value').addEventListener('input', updateTotals); document.querySelector('#tax-mode').addEventListener('change', updateTotals); document.querySelector('#paid-amount').addEventListener('input', updateTotals);
+    document.querySelector('#supplier-name').addEventListener('input', () => { document.querySelector('#supplier-id').value = ''; document.querySelector('#supplier-name').classList.remove('is-invalid'); document.querySelector('#supplier-phone').value = ''; document.querySelector('#supplier-address').value = ''; document.querySelector('#supplier-selection-status').textContent = 'Chưa chọn: hãy chọn một kết quả trong danh sách gợi ý.'; scheduleDraftSave(); });
+    itemsBody.addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#discount').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#tax-value').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#tax-mode').addEventListener('change', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#paid-amount').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#invoice-number').addEventListener('input', scheduleDraftSave); document.querySelector('#invoice-date').addEventListener('change', scheduleDraftSave);
     document.querySelector('#view-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').showModal()); document.querySelector('#close-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').close());
+    window.addEventListener('beforeunload', saveDraft); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveDraft(); });
     document.querySelector('#confirm').addEventListener('click', async () => {
       if (confirming) return;
       const rows = [...itemsBody.querySelectorAll('.invoice-line')];
@@ -279,6 +334,7 @@
         document.querySelector('#notice').textContent = result.status === 'SYNCED'
           ? `Đã lưu hóa đơn #${result.invoiceId} và tạo phiếu nhập KiotViet ${result.kiotVietPurchaseOrderCode || `#${result.kiotVietPurchaseOrderId}`}.`
           : result.warning;
+        if (draftKey) localStorage.removeItem(draftKey);
         setTimeout(() => location.href = '/index.html', 1400);
       } catch (error) { document.querySelector('#notice').className = 'alert alert-danger'; document.querySelector('#notice').textContent = error.message; confirming = false; button.textContent = 'Xác nhận hóa đơn'; document.querySelectorAll('.delete-line').forEach((remove) => { remove.disabled = false; }); updateTotals(); }
     });

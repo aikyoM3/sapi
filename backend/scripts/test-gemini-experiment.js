@@ -34,7 +34,7 @@ async function main() {
     assert.equal(captures[0].config.responseJsonSchema, service.invoiceSchema);
     assert(captures[0].contents[0].parts.some((part) => part.text?.includes('THÔNG TIN NGƯỜI MUA')));
     assert(captures[0].contents[0].parts.some((part) => part.text?.includes('Danh mục in sẵn')));
-    assert(captures[0].contents[0].parts.some((part) => part.text?.includes('không đổi unit')));
+    assert(captures[0].contents[0].parts.some((part) => part.text?.includes('quantity_cells')));
   } finally {
     if (oldModel === undefined) delete process.env.GEMINI_MODEL; else process.env.GEMINI_MODEL = oldModel;
     if (oldFallback === undefined) delete process.env.GEMINI_FALLBACK_MODEL; else process.env.GEMINI_FALLBACK_MODEL = oldFallback;
