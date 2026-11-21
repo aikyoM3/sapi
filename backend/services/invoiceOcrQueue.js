@@ -10,10 +10,8 @@ function failureDetails(error) {
   const invalidOutput = Boolean(diagnostics.prompt_failures?.length) || /response rỗng|JSON không hợp lệ|không đúng schema/i.test(raw);
   const retryable = invalidOutput || [401, 402, 403, 404, 408, 429, 500, 502, 503, 504].includes(status)
     || /abort|timeout|timed out|fetch failed|model_not_found|no available channel|rate.limit/i.test(raw);
-  let delaySeconds = 30;
-  if (status === 429 || /rate.limit/i.test(raw)) delaySeconds = 90;
-  else if (/model_not_found|no available channel/i.test(raw)) delaySeconds = 120;
-  else if (status === 503) delaySeconds = 60;
+  const blockRouteForBatch = [401, 402, 403, 404, 429].includes(status)
+    || /model_not_found|no available channel|rate.?limit|quota|request.{0,20}block|block.{0,20}request|api.?key.{0,20}invalid|permission denied/i.test(raw);
   const publicMessage = status === 429 || /rate.limit/i.test(raw)
     ? 'Dịch vụ đang giới hạn tần suất. Hệ thống sẽ tự thử lại.'
     : status === 504 || /timeout|timed out|deadline/i.test(raw)
@@ -23,12 +21,35 @@ function failureDetails(error) {
         : invalidOutput
           ? 'Kết quả trả về chưa đúng định dạng. Hệ thống sẽ thử lại.'
           : 'Chưa xử lý được ảnh. Hệ thống sẽ tự thử lại.';
-  return { diagnostics, status, invalidOutput, retryable, delaySeconds, publicMessage };
+  const finalMessage = status === 429 || /rate.limit/i.test(raw)
+    ? 'Dịch vụ đang giới hạn tần suất trên các tuyến khả dụng.'
+    : status === 504 || /timeout|timed out|deadline/i.test(raw)
+      ? 'Các tuyến xử lý khả dụng không phản hồi trước thời hạn.'
+      : invalidOutput
+        ? 'Các kết quả trả về không đúng định dạng yêu cầu.'
+        : 'Không còn tuyến xử lý khả dụng cho ảnh này.';
+  return { diagnostics, status, invalidOutput, retryable, blockRouteForBatch, publicMessage, finalMessage };
+}
+
+function nextAttemptPlan(session, info, routeCount, maxAttempts) {
+  const useDetailedPrompt = info.invalidOutput && session.prompt_version !== 'detailed';
+  const nextRoute = useDetailedPrompt ? Number(session.route_index) : Number(session.route_index) + 1;
+  const nextPrompt = useDetailedPrompt ? 'detailed' : session.prompt_version || 'compact';
+  const routesRemain = useDetailedPrompt || nextRoute < routeCount;
+  return {
+    nextRoute,
+    nextPrompt,
+    shouldRetry: Boolean(info.retryable && routesRemain && Number(session.queue_attempts) < maxAttempts),
+  };
 }
 
 function startInvoiceOcrQueue(pool) {
   const tickMs = Math.max(1000, Number(process.env.INVOICE_OCR_QUEUE_TICK_MS) || 3000);
   const maxAttempts = Math.max(1, Number(process.env.INVOICE_OCR_MAX_ATTEMPTS) || 8);
+  // A permanent/rate-limit failure disables that route only for the current
+  // batch. A new batch evaluates every route again, so temporary incidents do
+  // not poison future uploads.
+  const blockedRoutesByBatch = new Map();
   let busy = false;
   let stopped = false;
 
@@ -63,6 +84,23 @@ function startInvoiceOcrQueue(pool) {
     try {
       const session = await claim();
       if (!session) return;
+      const batchKey = String(session.batch_token || session.invoice_session_id);
+      const blockedState = blockedRoutesByBatch.get(batchKey);
+      if (blockedState?.routes.has(Number(session.route_index))) {
+        const nextRoute = Number(session.route_index) + 1;
+        if (nextRoute >= blockedState.routeCount) {
+          await pool.query(`UPDATE invoicesession SET status='FAILED', next_attempt_at=NULL,
+            processing_started_at=NULL, error_message=$1, updated_at=NOW()
+            WHERE invoice_session_id=$2 AND status='PROCESSING'`,
+          ['Không còn tuyến xử lý khả dụng cho ảnh này.', session.invoice_session_id]);
+          return;
+        }
+        await pool.query(`UPDATE invoicesession SET status='RETRY_WAIT', route_index=$1,
+          next_attempt_at=NOW(), processing_started_at=NULL, error_message=$2, updated_at=NOW()
+          WHERE invoice_session_id=$3 AND status='PROCESSING'`,
+        [nextRoute, 'Bỏ qua tuyến đã bị khóa trong lượt xử lý hàng loạt này.', session.invoice_session_id]);
+        return;
+      }
       try {
         const result = await processInvoiceSession(pool, session, {
           singleRoute: true,
@@ -73,20 +111,24 @@ function startInvoiceOcrQueue(pool) {
       } catch (error) {
         const info = failureDetails(error);
         const routeCount = Math.max(1, Number(info.diagnostics.route_count) || 1);
-        const useDetailedPrompt = info.invalidOutput && session.prompt_version !== 'detailed';
-        const nextRoute = useDetailedPrompt ? session.route_index : (Number(session.route_index) + 1) % routeCount;
-        const nextPrompt = useDetailedPrompt ? 'detailed' : session.prompt_version || 'compact';
-        if (info.retryable && Number(session.queue_attempts) < maxAttempts) {
+        if (info.blockRouteForBatch) {
+          const state = blockedRoutesByBatch.get(batchKey) || { routeCount, routes: new Set() };
+          state.routeCount = routeCount;
+          state.routes.add(Number(session.route_index));
+          blockedRoutesByBatch.set(batchKey, state);
+        }
+        const plan = nextAttemptPlan(session, info, routeCount, maxAttempts);
+        if (plan.shouldRetry) {
           await pool.query(`UPDATE invoicesession SET status='RETRY_WAIT', route_index=$1, prompt_version=$2,
             next_attempt_at=NOW()+($3 || ' seconds')::interval, processing_started_at=NULL,
             error_message=$4, updated_at=NOW() WHERE invoice_session_id=$5 AND status='PROCESSING'`,
-          [nextRoute, nextPrompt, String(info.delaySeconds), info.publicMessage, session.invoice_session_id]);
+          [plan.nextRoute, plan.nextPrompt, '0', info.publicMessage, session.invoice_session_id]);
           console.warn(`Bulk invoice retry scheduled: session ${session.invoice_session_id}, status ${info.status || 'unknown'}, attempt ${session.queue_attempts}.`);
         } else {
           await pool.query(`UPDATE invoicesession SET status='FAILED', next_attempt_at=NULL,
             processing_started_at=NULL, error_message=$1, updated_at=NOW()
             WHERE invoice_session_id=$2 AND status='PROCESSING'`,
-          [safeMessage(`Không xử lý được ảnh sau ${session.queue_attempts} lần thử. ${info.publicMessage}`), session.invoice_session_id]);
+          [safeMessage(`Không xử lý được ảnh sau ${session.queue_attempts} lần thử. ${info.finalMessage}`), session.invoice_session_id]);
           console.error(`Bulk invoice failed: session ${session.invoice_session_id}:`, safeMessage(error?.message));
         }
       }
@@ -103,4 +145,4 @@ function startInvoiceOcrQueue(pool) {
   return () => { stopped = true; clearInterval(timer); };
 }
 
-module.exports = { startInvoiceOcrQueue, failureDetails };
+module.exports = { startInvoiceOcrQueue, failureDetails, nextAttemptPlan };

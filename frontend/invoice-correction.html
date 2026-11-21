@@ -99,16 +99,28 @@
       let draft;
       try { draft = JSON.parse(localStorage.getItem(draftKey)); } catch { return false; }
       if (!draft || draft.version !== 1 || draft.fingerprint !== extractionFingerprint() || !Array.isArray(draft.items)) return false;
-      const fields = [['#supplier-id', draft.supplier?.id], ['#supplier-name', draft.supplier?.name], ['#supplier-phone', draft.supplier?.phone], ['#supplier-address', draft.supplier?.address], ['#invoice-number', draft.invoiceNumber], ['#invoice-date', draft.invoiceDate], ['#discount', draft.discount], ['#tax-mode', draft.taxMode], ['#tax-value', draft.taxValue], ['#paid-amount', draft.paidAmount]];
+      const hasDraftSupplier = Boolean(text(draft.supplier?.id) || text(draft.supplier?.name).trim());
+      const fields = [
+        ...(hasDraftSupplier ? [['#supplier-id', draft.supplier?.id], ['#supplier-name', draft.supplier?.name], ['#supplier-phone', draft.supplier?.phone], ['#supplier-address', draft.supplier?.address]] : []),
+        ['#invoice-number', draft.invoiceNumber], ['#invoice-date', draft.invoiceDate], ['#discount', draft.discount], ['#tax-mode', draft.taxMode], ['#tax-value', draft.taxValue], ['#paid-amount', draft.paidAmount],
+      ];
       fields.forEach(([selector, value]) => { if (value !== undefined && value !== null) document.querySelector(selector).value = value; });
       const savedByIndex = new Map(draft.items.map((item) => [String(item.sourceIndex), item]));
       [...itemsBody.querySelectorAll('.invoice-line')].forEach((row) => {
         const saved = savedByIndex.get(row.dataset.sourceIndex);
         if (!saved) { row.remove(); return; }
-        const product = row.querySelector('.product-name'); product.value = text(saved.productName); product.dataset.productId = text(saved.productId); product.dataset.userEdited = saved.productId ? 'true' : '';
+        const product = row.querySelector('.product-name');
+        // A blank old draft must not erase a mapping created after that draft
+        // was saved. Explicit user selections/text still take precedence.
+        if (text(saved.productId) || text(saved.productName).trim()) {
+          product.value = text(saved.productName); product.dataset.productId = text(saved.productId); product.dataset.autoMapped = ''; product.dataset.userEdited = 'true';
+        }
         row.querySelector('.line-quantity').value = text(saved.quantity); row.querySelector('.line-unit').value = text(saved.unit); row.querySelector('.line-price').value = text(saved.unitPrice); row.dataset.conversionRate = text(saved.conversionRate);
       });
-      document.querySelector('#supplier-selection-status').textContent = draft.supplier?.id ? `Đã khôi phục lựa chọn: ${text(draft.supplier.name)}.` : 'Đã khôi phục tên đang nhập; hãy chọn nhà cung cấp từ danh sách gợi ý.';
+      const selectedSupplierId = document.querySelector('#supplier-id').value;
+      document.querySelector('#supplier-selection-status').textContent = selectedSupplierId
+        ? `${hasDraftSupplier ? 'Đã khôi phục lựa chọn' : 'Đã tự đối chiếu'}: ${text(document.querySelector('#supplier-name').value)}.`
+        : 'Đã khôi phục tên đang nhập; hãy chọn nhà cung cấp từ danh sách gợi ý.';
       document.querySelector('#draft-status').textContent = `Đã khôi phục bản nháp lưu lúc ${new Date(draft.savedAt).toLocaleString('vi-VN')}`;
       return true;
     }
