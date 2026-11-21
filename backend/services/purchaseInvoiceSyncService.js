@@ -34,7 +34,6 @@ async function syncPurchaseInvoice(pool, userId, invoiceId) {
   const payload = buildPurchaseOrderPayload({
     branchId: Number(branch.kiotviet_id),
     supplier: { name: invoice.supplier_name, phone: invoice.phone_number, address: invoice.address },
-    purchaseDate: invoice.invoice_date ? new Date(invoice.invoice_date) : new Date(),
     discount: Number(invoice.discount_amount || 0),
     total: Number(invoice.total_amount),
     invoiceNumber: invoice.invoice_number,
@@ -77,7 +76,7 @@ async function updatePurchaseInvoice(pool, userId, invoiceId, body) {
       if (!invoice.kiotviet_purchase_order_id) throw Object.assign(new Error('Thiếu mã phiếu nhập KiotViet; không thể cập nhật an toàn.'), { statusCode: 409 });
       const branch = (await client.query('SELECT kiotviet_id FROM kiotvietbranch WHERE user_id=$1 ORDER BY branch_id LIMIT 1', [userId])).rows[0];
       if (!branch) throw Object.assign(new Error('Chưa có chi nhánh KiotViet. Hãy đồng bộ danh mục trước.'), { statusCode: 409 });
-      const payload = buildPurchaseOrderPayload({ branchId: Number(branch.kiotviet_id), supplier: { name: supplierResult.rows[0].supplier_name, phone: supplierResult.rows[0].phone_number, address: supplierResult.rows[0].address }, purchaseDate: invoiceDate || new Date(), discount, total: subtotal - discount, invoiceNumber: cleanText(body.invoiceNumber) || null, items: normalized.map((item) => ({ productCode: byId.get(item.productId).product_code, quantity: item.quantity, unitPrice: item.unitPrice })) });
+      const payload = buildPurchaseOrderPayload({ branchId: Number(branch.kiotviet_id), supplier: { name: supplierResult.rows[0].supplier_name, phone: supplierResult.rows[0].phone_number, address: supplierResult.rows[0].address }, discount, total: subtotal - discount, invoiceNumber: cleanText(body.invoiceNumber) || null, items: normalized.map((item) => ({ productCode: byId.get(item.productId).product_code, quantity: item.quantity, unitPrice: item.unitPrice })) });
       // KiotViet is updated first. If it rejects the update, no local data is changed.
       await updatePurchaseOrder(await loadConnectionConfig(pool, userId), invoice.kiotviet_purchase_order_id, payload);
     }

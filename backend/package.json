@@ -9,6 +9,7 @@
     "dev": "node --watch server.js",
     "test:kiotviet": "node scripts/test-kiotviet-connection.js",
     "test:kiotviet:mock": "node scripts/test-kiotviet-mock-purchase-order.js",
+    "test:kiotviet:payload": "node scripts/test-kiotviet-purchase-payload.js",
     "experiment:gemini": "node scripts/gemini-experiment.js",
     "test:gemini-experiment": "node scripts/test-gemini-experiment.js",
     "test:gemini-config": "node scripts/test-gemini-config.js",

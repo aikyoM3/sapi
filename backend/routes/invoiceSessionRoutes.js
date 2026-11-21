@@ -361,7 +361,6 @@ module.exports = function invoiceSessionRoutes(pool) {
           phone: supplierRecord.phone_number,
           address: supplierRecord.address,
         },
-        purchaseDate: invoiceDate || new Date(),
         discount,
         total: subtotal - discount,
         invoiceNumber: safeText(req.body.invoiceNumber) || null,

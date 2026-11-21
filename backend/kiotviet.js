@@ -110,9 +110,9 @@ async function createClient(config) {
   };
 }
 
-function buildPurchaseOrderPayload({ branchId, supplier, purchaseDate, discount, total, items, invoiceNumber }) {
+function buildPurchaseOrderPayload({ branchId, supplier, discount, total, items, invoiceNumber }) {
   return {
-    purchaseDate: purchaseDate.toISOString(),
+    purchaseDate: new Date().toISOString(),
     branchId,
     supplier: {
       ...(supplier.code ? { code: supplier.code } : {}),
@@ -121,7 +121,8 @@ function buildPurchaseOrderPayload({ branchId, supplier, purchaseDate, discount,
       address: supplier.address || '',
     },
     description: `Tạo từ SAPI${invoiceNumber ? ` - Hóa đơn ${invoiceNumber}` : ''}`,
-    isDraft: 1,
+    // SAPI only marks an invoice as synced after creating a completed receipt.
+    isDraft: 0,
     discount,
     paidAmount: total,
     paymentMethod: 'Cash',
