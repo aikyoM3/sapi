@@ -77,12 +77,15 @@ async function lookupMappedSupplier(pool, userId, extractedName) {
   return rows[0] || null;
 }
 
-async function mapExtractedInvoice(pool, gemini, userId) {
+async function mapExtractedInvoice(pool, gemini, userId, options = {}) {
   const corresponding = correspondingFromGemini(gemini);
   if (!pool || !userId) return corresponding;
 
   try {
-    const supplier = await lookupMappedSupplier(pool, userId, gemini.supplier.name);
+    const requestedSupplierId = Number(options.supplierId);
+    const supplier = Number.isInteger(requestedSupplierId) && requestedSupplierId > 0
+      ? (await pool.query(`SELECT supplier_id,supplier_name,phone_number,address FROM supplier WHERE user_id=$1 AND supplier_id=$2`, [userId, requestedSupplierId])).rows[0]
+      : await lookupMappedSupplier(pool, userId, gemini.supplier.name);
     if (supplier) corresponding.supplier = {
       ...corresponding.supplier,
       supplier_id: supplier.supplier_id,

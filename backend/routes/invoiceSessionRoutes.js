@@ -167,6 +167,21 @@ module.exports = function invoiceSessionRoutes(pool) {
     } catch (error) { next(error); }
   });
 
+  router.get('/api/invoice-sessions/:token/mapping', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedSession(pool, currentUserId(req), req.params.token);
+      if (!session) return res.status(404).json({ error: 'Không tìm thấy phiên hóa đơn.' });
+      if (!session.ocr_result?.gemini || !['READY_FOR_REVIEW', 'INCOMPLETE'].includes(session.status)) {
+        return res.status(409).json({ error: 'Phiên chưa sẵn sàng để đối chiếu.' });
+      }
+      const supplierId = Number(req.query.supplierId);
+      if (!Number.isInteger(supplierId) || supplierId <= 0) return res.status(400).json({ error: 'Nhà cung cấp không hợp lệ.' });
+      const supplier = await pool.query('SELECT supplier_id FROM supplier WHERE supplier_id=$1 AND user_id=$2', [supplierId, currentUserId(req)]);
+      if (!supplier.rowCount) return res.status(403).json({ error: 'Nhà cung cấp không thuộc account hiện tại.' });
+      res.json({ corresponding: await mapExtractedInvoice(pool, session.ocr_result.gemini, currentUserId(req), { supplierId }) });
+    } catch (error) { next(error); }
+  });
+
   router.delete('/api/invoice-sessions/:token', requireAuth, async (req, res, next) => {
     const client = await pool.connect();
     let imagePaths = [];
