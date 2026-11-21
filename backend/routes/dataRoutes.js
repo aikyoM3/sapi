@@ -81,7 +81,7 @@ module.exports = function dataRoutes(pool) {
     try { res.json(await syncPurchaseInvoice(pool, currentUserId(req), Number(req.params.id))); }
     catch (error) {
       if (!(error instanceof KiotVietError)) return next(error);
-      console.warn(`KiotViet invoice sync failed (invoice=${Number(req.params.id)}, user=${currentUserId(req)}, code=${error.code || 'UNKNOWN'}): ${error.message}`);
+      console.warn(`KiotViet invoice sync failed (invoice=${Number(req.params.id)}, user=${currentUserId(req)}, code=${error.code || 'UNKNOWN'}, upstreamStatus=${error.upstreamStatus || 'unknown'}): ${error.message}${error.upstreamMessage ? ` | upstream=${error.upstreamMessage}` : ''}`);
       const code = error.code === 'AUTH' ? 'KIOTVIET_AUTH_FAILED'
         : error.code === 'ACCOUNT_EXPIRED' ? 'KIOTVIET_ACCOUNT_EXPIRED'
         : error.code === 'RETAILER' ? 'KIOTVIET_PERMISSION_DENIED' : 'KIOTVIET_CONNECTION_ERROR';

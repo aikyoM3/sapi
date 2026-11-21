@@ -90,7 +90,12 @@ async function createClient(config) {
         throw connectionError(error);
       }
       const result = await response.json().catch(() => ({}));
-      if (!response.ok && ![400, 409, 422].includes(response.status)) throw apiStatusError(response.status);
+      if (!response.ok && ![400, 409, 422].includes(response.status)) {
+        const error = apiStatusError(response.status);
+        error.upstreamStatus = response.status;
+        error.upstreamMessage = String(result.message || result.error || '').slice(0, 1000);
+        throw error;
+      }
       if (!response.ok) throw new KiotVietError(result.message || result.error || `KiotViet từ chối phiếu nhập (HTTP ${response.status}).`, 'PURCHASE_ORDER', 400);
       return result;
     },
