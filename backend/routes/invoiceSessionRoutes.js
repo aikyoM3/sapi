@@ -366,6 +366,20 @@ module.exports = function invoiceSessionRoutes(pool) {
       const taxedItems = pricesAfterTax(normalized, tax.taxAmount);
       const invoiceDate = req.body.invoiceDate ? new Date(req.body.invoiceDate) : null;
       if (invoiceDate && Number.isNaN(invoiceDate.getTime())) throw Object.assign(new Error('Ngày hóa đơn không hợp lệ.'), { statusCode: 400 });
+      const invoiceNumber = safeText(req.body.invoiceNumber) || null;
+      if (invoiceNumber) {
+        const duplicate = await client.query(`
+          SELECT invoice_id, kiotviet_purchase_order_code
+          FROM purchaseinvoice
+          WHERE user_id=$1 AND supplier_id=$2 AND status='SYNCED'
+            AND LOWER(TRIM(invoice_number))=LOWER(TRIM($3))
+          ORDER BY invoice_id DESC LIMIT 1
+        `, [currentUserId(req), supplierId, invoiceNumber]);
+        if (duplicate.rowCount) {
+          const existing = duplicate.rows[0];
+          throw Object.assign(new Error(`Số hóa đơn ${invoiceNumber} đã được đồng bộ ở hóa đơn #${existing.invoice_id}${existing.kiotviet_purchase_order_code ? ` (phiếu KiotViet ${existing.kiotviet_purchase_order_code})` : ''}. Hãy mở hóa đơn đó để sửa hoặc đổi số nếu đây là chứng từ khác.`), { statusCode: 409 });
+        }
+      }
       const branch = (await client.query('SELECT kiotviet_id FROM kiotvietbranch WHERE user_id = $1 ORDER BY branch_id LIMIT 1', [currentUserId(req)])).rows[0];
       const purchasePayload = branch ? buildPurchaseOrderPayload({
         branchId: Number(branch.kiotviet_id),
@@ -377,7 +391,7 @@ module.exports = function invoiceSessionRoutes(pool) {
         discount,
         total: tax.totalAfterTax,
         paidAmount,
-        invoiceNumber: safeText(req.body.invoiceNumber) || null,
+        invoiceNumber,
         items: taxedItems.map((item) => ({
           productCode: productsById.get(item.productId).product_code,
           quantity: item.quantity,
@@ -397,7 +411,7 @@ module.exports = function invoiceSessionRoutes(pool) {
           (user_id, supplier_id, invoice_date, invoice_number, total_amount, discount_amount,
            tax_input_mode, tax_rate, tax_amount, paid_amount, status, kiotviet_purchase_order_id, kiotviet_purchase_order_code)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING invoice_id`,
-        [currentUserId(req), supplierId, invoiceDate, safeText(req.body.invoiceNumber) || null, tax.totalAfterTax, discount,
+        [currentUserId(req), supplierId, invoiceDate, invoiceNumber, tax.totalAfterTax, discount,
           tax.taxMode, tax.taxRate, tax.taxAmount, paidAmount, kiotVietOrder ? 'SYNCED' : 'PENDING_SYNC', kiotVietOrder?.id || null, kiotVietOrder?.code || null],
       );
       for (const item of normalized) {

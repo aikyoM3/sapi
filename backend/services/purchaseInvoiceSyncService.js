@@ -20,6 +20,19 @@ async function syncPurchaseInvoice(pool, userId, invoiceId) {
   const invoice = invoiceResult.rows[0];
   if (!invoice) throw Object.assign(new Error('Không tìm thấy hóa đơn.'), { statusCode: 404 });
   if (invoice.status === 'SYNCED') return { status: 'SYNCED', id: invoice.kiotviet_purchase_order_id, code: invoice.kiotviet_purchase_order_code };
+  if (cleanText(invoice.invoice_number)) {
+    const duplicate = await pool.query(`
+      SELECT invoice_id, kiotviet_purchase_order_code
+      FROM purchaseinvoice
+      WHERE user_id=$1 AND supplier_id=$2 AND status='SYNCED' AND invoice_id<>$3
+        AND LOWER(TRIM(invoice_number))=LOWER(TRIM($4))
+      ORDER BY invoice_id DESC LIMIT 1
+    `, [userId, invoice.supplier_id, invoiceId, cleanText(invoice.invoice_number)]);
+    if (duplicate.rowCount) {
+      const existing = duplicate.rows[0];
+      throw Object.assign(new Error(`Số hóa đơn ${cleanText(invoice.invoice_number)} đã được đồng bộ ở hóa đơn #${existing.invoice_id}${existing.kiotviet_purchase_order_code ? ` (phiếu KiotViet ${existing.kiotviet_purchase_order_code})` : ''}. Không gửi lại để tránh tạo trùng.`), { statusCode: 409 });
+    }
+  }
 
   const { rows: items } = await pool.query(`
     SELECT pii.quantity, pii.unit_price, p.product_code
