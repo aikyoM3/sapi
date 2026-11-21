@@ -100,7 +100,7 @@
         processButton.innerHTML = processing ? '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Đang xử lý…' : state.status === 'FAILED' ? 'Thử lại' : 'Gửi ảnh';
         input.disabled = uploading || processingRequested || !canManageImages(); document.querySelector('#choose-again').disabled = input.disabled; uploadButton.disabled = uploading || processingRequested || !canManageImages() || !selectedFiles.length;
         if (state.status === 'PROCESSING') showStatus(`Đang xử lý ${state.imageCount} trang…`);
-        else if (state.status === 'READY_FOR_REVIEW') { clearInterval(pollTimer); location.href = `/invoice-correction.html?session=${encodeURIComponent(sessionToken)}`; }
+        else if (state.status === 'READY_FOR_REVIEW') { clearInterval(pollTimer); SapiUI.playNotificationSound('success'); showStatus('Đã xử lý ảnh xong. Đang mở trang kiểm tra…', 'success'); setTimeout(() => { location.href = `/invoice-correction.html?session=${encodeURIComponent(sessionToken)}`; }, 550); }
         else if (state.status === 'FAILED') showStatus(`${state.error || 'Xử lý thất bại.'} Ảnh vẫn được giữ trong phiên; bạn có thể kiểm tra, thay ảnh hoặc bấm Thử lại.`, 'danger');
         else showStatus(`Phiên hiện có ${state.imageCount} trang đã upload. ${state.imageCount ? 'Bạn có thể thêm trang hoặc bấm Gửi ảnh.' : 'Đang chờ ảnh từ PC hoặc điện thoại.'}`);
       } catch (error) { showStatus(error.message, 'danger'); }

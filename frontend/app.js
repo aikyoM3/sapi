@@ -35,6 +35,22 @@ window.SapiUI = (() => {
     toast.addEventListener('mouseenter', () => clearTimeout(timer)); toast.addEventListener('mouseleave', startTimer);
     toast.addEventListener('focusin', () => clearTimeout(timer)); toast.addEventListener('focusout', startTimer); startTimer();
   }
+  let audioContext;
+  function playNotificationSound(type = 'success') {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return false;
+      audioContext ||= new AudioContext();
+      const play = () => {
+        const now = audioContext.currentTime; const gain = audioContext.createGain(); gain.connect(audioContext.destination);
+        gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.16, now + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+        const frequencies = type === 'danger' ? [440, 330] : [660, 880];
+        frequencies.forEach((frequency, index) => { const oscillator = audioContext.createOscillator(); oscillator.type = 'sine'; oscillator.frequency.value = frequency; oscillator.connect(gain); oscillator.start(now + index * 0.16); oscillator.stop(now + index * 0.16 + 0.25); });
+      };
+      if (audioContext.state === 'suspended') audioContext.resume().then(play).catch(() => {}); else play();
+      return true;
+    } catch { return false; }
+  }
   let confirmationOpen = false;
   function confirmAction(message, { title = 'Xác nhận thao tác', confirmLabel = 'Xác nhận' } = {}) {
     if (confirmationOpen) return Promise.resolve(false);
@@ -50,8 +66,22 @@ window.SapiUI = (() => {
       document.body.append(dialog); dialog.showModal();
     });
   }
-  return { notify, confirmAction, setFontSize };
+  return { notify, confirmAction, setFontSize, playNotificationSound };
 })();
+
+const pendingOcrKey = 'sapi.pendingOcrTokens';
+function pendingOcrTokens() {
+  try { return new Set(JSON.parse(localStorage.getItem(pendingOcrKey) || '[]')); } catch { return new Set(); }
+}
+function observeOcrCompletions(rows) {
+  const pending = pendingOcrTokens(); if (!pending.size) return;
+  const completed = rows.filter((row) => row.session_token && pending.has(row.session_token) && row.status === 'READY_FOR_REVIEW');
+  const failed = rows.filter((row) => row.session_token && pending.has(row.session_token) && row.status === 'FAILED');
+  if (completed.length) { SapiUI.playNotificationSound('success'); SapiUI.notify(`${completed.length} hóa đơn đã xử lý ảnh xong và sẵn sàng kiểm tra.`); }
+  if (failed.length) { SapiUI.playNotificationSound('danger'); SapiUI.notify(`${failed.length} hóa đơn xử lý ảnh thất bại.`, 'danger'); }
+  [...completed, ...failed].forEach((row) => pending.delete(row.session_token));
+  try { if (pending.size) localStorage.setItem(pendingOcrKey, JSON.stringify([...pending])); else localStorage.removeItem(pendingOcrKey); } catch { /* Sound tracking is best effort only. */ }
+}
 
 const pageConfigs = {
   invoices: {
@@ -170,6 +200,7 @@ async function loadTable(pageName) {
     if (response.status === 401) return window.location.replace('/login.html');
     if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
     const rows = await response.json();
+    if (pageName === 'invoices') observeOcrCompletions(rows);
     loadedTableName = pageName; loadedTableRows = rows;
     const invoiceSelectionHeader = pageName === 'invoices' ? '<th style="width:42px"><input id="invoice-select-all" class="form-check-input" type="checkbox" aria-label="Chọn tất cả hóa đơn có thể xóa"></th>' : '';
     const header = invoiceSelectionHeader + config.columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('');

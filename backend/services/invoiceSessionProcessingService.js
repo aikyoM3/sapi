@@ -62,13 +62,20 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
     reviewedInvoice = details.invoice;
   }
 
-  const corresponding = await mapExtractedInvoice(pool, reviewedInvoice, session.user_id);
+  // Batch sessions intentionally defer catalog lookup until the user opens the
+  // correction page. Mappings confirmed on earlier invoices are then available
+  // to later invoices in the same batch.
+  const corresponding = session.source_mode === 'BATCH'
+    ? null
+    : await mapExtractedInvoice(pool, reviewedInvoice, session.user_id);
+  const storedResult = { gemini: reviewedInvoice, raw_gemini: details.raw_json || details.invoice, sanity };
+  if (corresponding) storedResult.corresponding = corresponding;
   const updated = await pool.query(
     `UPDATE invoicesession
      SET status='READY_FOR_REVIEW', ocr_result=$1, error_message=NULL,
          next_attempt_at=NULL, processing_started_at=NULL, updated_at=NOW()
      WHERE invoice_session_id=$2 AND status='PROCESSING'`,
-    [JSON.stringify({ gemini: reviewedInvoice, raw_gemini: details.raw_json || details.invoice, sanity, corresponding }), session.invoice_session_id],
+    [JSON.stringify(storedResult), session.invoice_session_id],
   );
   return { updated: updated.rowCount === 1, details };
 }

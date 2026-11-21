@@ -8,6 +8,7 @@ const { requireAuth, currentUserId } = require('../middleware/auth');
 const { getMobileBaseUrl } = require('../services/lanAddress');
 const { loadConnectionConfig } = require('../services/kiotVietConnectionService');
 const { calculateInvoiceTax, pricesAfterTax, paidAmountForInvoice } = require('../services/invoiceTaxService');
+const { mapExtractedInvoice } = require('../services/invoiceMappingService');
 const { buildPurchaseOrderPayload, createPurchaseOrder } = require('../kiotviet');
 
 const router = express.Router();
@@ -154,7 +155,15 @@ module.exports = function invoiceSessionRoutes(pool) {
       const session = await ownedSession(pool, currentUserId(req), req.params.token);
       if (!session) return res.status(404).json({ error: 'Không tìm thấy phiên hóa đơn.' });
       const { rows } = await pool.query('SELECT invoice_session_image_id, page_number FROM invoicesessionimage WHERE invoice_session_id = $1 ORDER BY page_number', [session.invoice_session_id]);
-      res.json({ status: session.status, extraction: session.ocr_result, error: session.error_message, images: rows.map((image) => ({ imageId: image.invoice_session_image_id, pageNumber: image.page_number, url: `/api/invoice-sessions/${session.session_token}/images/${image.invoice_session_image_id}` })) });
+      let extraction = session.ocr_result;
+      if (extraction?.gemini && ['READY_FOR_REVIEW', 'INCOMPLETE'].includes(session.status)) {
+        extraction = {
+          ...extraction,
+          // Always use the latest confirmed mappings when opening a correction page.
+          corresponding: await mapExtractedInvoice(pool, extraction.gemini, currentUserId(req)),
+        };
+      }
+      res.json({ status: session.status, extraction, error: session.error_message, images: rows.map((image) => ({ imageId: image.invoice_session_image_id, pageNumber: image.page_number, url: `/api/invoice-sessions/${session.session_token}/images/${image.invoice_session_image_id}` })) });
     } catch (error) { next(error); }
   });
 

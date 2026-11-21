@@ -63,7 +63,7 @@ Stop the server with Ctrl+C in that terminal. If port 3000 is already in use, st
 - Trên trang **Nhập hàng**, chọn **Upload ảnh hàng loạt**. Trong phiên bản này, mỗi ảnh tương ứng một hóa đơn riêng; hóa đơn nhiều trang vẫn dùng luồng upload thông thường.
 - Có thể chọn tối đa 20 ảnh. Sau khi bấm **Tạo phiên xử lý**, trình duyệt quay ngay về danh sách và backend xử lý lần lượt từng hóa đơn.
 - Trạng thái được cập nhật theo thứ tự **Chờ xử lý ảnh** → **Đang xử lý ảnh** → **Chờ kiểm tra**. Lỗi tạm thời chuyển sang **Tạm hoãn, sẽ thử lại** để ảnh khác không bị chặn.
-- Khi hoàn tất, chọn **Tiếp tục** để mở trực tiếp màn hình sửa hóa đơn. Chế độ hàng loạt không tự xác nhận hóa đơn và không tự gửi dữ liệu sang KiotViet.
+- Khi hoàn tất, danh sách phát âm báo và chọn **Tiếp tục** để mở màn hình sửa hóa đơn. Chế độ hàng loạt chỉ lưu JSON trích xuất; đối chiếu danh mục được tính bằng dữ liệu mới nhất lúc mở từng hóa đơn, nên mapping vừa xác nhận ở hóa đơn trước có thể dùng cho hóa đơn sau. Chế độ này không tự xác nhận hoặc gửi dữ liệu sang KiotViet.
 - Hàng đợi nằm trong PostgreSQL và được tiếp tục sau khi backend khởi động lại. `INVOICE_OCR_QUEUE_TICK_MS` và `INVOICE_OCR_MAX_ATTEMPTS` lần lượt điều chỉnh chu kỳ kiểm tra và số lần thử tối đa.
 
 **PowerShell:** if `npm start` fails with “running scripts is disabled”, use `npm.cmd start` (and `npm.cmd install`) instead of `npm`. Run those commands inside `backend`, not the project root.

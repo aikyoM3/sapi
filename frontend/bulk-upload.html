@@ -68,6 +68,7 @@
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(result.error || 'Không thể tạo phiên hàng loạt.');
         sessionStorage.setItem('sapi.bulkNotice', `Đã đưa ${result.count} hóa đơn vào hàng đợi xử lý.`);
+        try { const existing = JSON.parse(localStorage.getItem('sapi.pendingOcrTokens') || '[]'); localStorage.setItem('sapi.pendingOcrTokens', JSON.stringify([...new Set([...existing, ...result.sessions.map((session) => session.sessionToken)])])); } catch { /* Danh sách vẫn tự làm mới nếu trình duyệt chặn storage. */ }
         location.replace('/index.html');
       } catch (error) {
         showStatus(error.message, 'danger'); submit.disabled = false; submit.textContent = 'Tạo phiên xử lý';
