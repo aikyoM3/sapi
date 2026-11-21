@@ -95,7 +95,6 @@ module.exports = function dataRoutes(pool) {
       await client.query('BEGIN');
       const invoice = await client.query('SELECT status FROM purchaseinvoice WHERE invoice_id=$1 AND user_id=$2 FOR UPDATE', [req.params.id, currentUserId(req)]);
       if (!invoice.rowCount) throw Object.assign(new Error('Không tìm thấy hóa đơn.'), { statusCode: 404 });
-      if (invoice.rows[0].status !== 'PENDING_SYNC') throw Object.assign(new Error('Chỉ có thể hủy hóa đơn chưa đồng bộ.'), { statusCode: 409 });
       await client.query('DELETE FROM purchaseinvoiceitem WHERE invoice_id=$1', [req.params.id]);
       await client.query('DELETE FROM purchaseinvoice WHERE invoice_id=$1 AND user_id=$2', [req.params.id, currentUserId(req)]);
       await client.query('COMMIT'); res.status(204).end();
@@ -193,6 +192,18 @@ module.exports = function dataRoutes(pool) {
     } catch (error) { next(error); }
   });
 
+  router.delete('/product-mappings/:id', async (req, res, next) => {
+    try {
+      const result = await pool.query(`
+        DELETE FROM productmapping pm USING product p
+        WHERE pm.mapping_id=$1 AND p.product_id=pm.local_product_id AND p.user_id=$2
+        RETURNING pm.mapping_id
+      `, [req.params.id, currentUserId(req)]);
+      if (!result.rowCount) return res.status(404).json({ error: 'Không tìm thấy dữ liệu đối chiếu.' });
+      res.status(204).end();
+    } catch (error) { next(error); }
+  });
+
   router.get('/supplier-mappings', async (req, res, next) => {
     try {
       const { rows } = await pool.query(`
@@ -215,6 +226,18 @@ module.exports = function dataRoutes(pool) {
       `, [externalName, req.params.id, currentUserId(req)]);
       if (!result.rowCount) return res.status(404).json({ error: 'Không tìm thấy dữ liệu đối chiếu nhà cung cấp.' });
       res.json({ updated: true });
+    } catch (error) { next(error); }
+  });
+
+  router.delete('/supplier-mappings/:id', async (req, res, next) => {
+    try {
+      const result = await pool.query(`
+        DELETE FROM suppliermapping sm USING supplier s
+        WHERE sm.supplier_mapping_id=$1 AND s.supplier_id=sm.local_supplier_id AND s.user_id=$2
+        RETURNING sm.supplier_mapping_id
+      `, [req.params.id, currentUserId(req)]);
+      if (!result.rowCount) return res.status(404).json({ error: 'Không tìm thấy dữ liệu đối chiếu nhà cung cấp.' });
+      res.status(204).end();
     } catch (error) { next(error); }
   });
 

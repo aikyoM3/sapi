@@ -12,6 +12,7 @@
     "test:kiotviet:payload": "node scripts/test-kiotviet-purchase-payload.js",
     "test:invoice-tax": "node scripts/test-invoice-tax.js",
     "test:invoice-sanity": "node scripts/test-invoice-sanity.js",
+    "test:deletion": "node scripts/test-delete-flows.js",
     "experiment:gemini": "node scripts/gemini-experiment.js",
     "test:gemini-experiment": "node scripts/test-gemini-experiment.js",
     "test:gemini-config": "node scripts/test-gemini-config.js",

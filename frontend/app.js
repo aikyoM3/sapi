@@ -148,6 +148,17 @@ const editConfigs = {
   mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ'],['conversionRate','conversion_rate_to_local','Hệ số quy đổi sang đơn vị nội bộ','number']] },
   supplierMappings: { title: 'Chỉnh sửa đối chiếu nhà cung cấp', id: 'supplier_mapping_id', endpoint: '/api/supplier-mappings', fields: [['providerSupplierName','provider_supplier_name','Tên nhà cung cấp trên hóa đơn']] },
 };
+const bulkDeleteConfigs = {
+  invoices: { label: 'Xóa các mục đã chọn', note: 'Chỉ xóa dữ liệu trong SAPI, không xóa phiếu trên KiotViet. Dữ liệu đối chiếu được giữ lại.' },
+  mappings: { label: 'Xóa đối chiếu đã chọn', note: 'Chỉ xóa liên kết đã chọn; không xóa hàng hóa hoặc nhà cung cấp.' },
+  supplierMappings: { label: 'Xóa đối chiếu đã chọn', note: 'Chỉ xóa liên kết đã chọn; không xóa nhà cung cấp.' },
+};
+function deleteUrlForRow(pageName, row) {
+  if (pageName === 'invoices') return row.session_token ? `/api/invoice-sessions/${encodeURIComponent(row.session_token)}` : `/api/invoices/${encodeURIComponent(row.invoice_id)}`;
+  if (pageName === 'mappings') return `/api/product-mappings/${encodeURIComponent(row.mapping_id)}`;
+  if (pageName === 'supplierMappings') return `/api/supplier-mappings/${encodeURIComponent(row.supplier_mapping_id)}`;
+  return '';
+}
 
 function formatDate(value) {
   return value ? new Intl.DateTimeFormat('vi-VN').format(new Date(value)) : '';
@@ -210,14 +221,15 @@ async function loadTable(pageName) {
     const rows = await response.json();
     if (pageName === 'invoices') observeOcrCompletions(rows);
     loadedTableName = pageName; loadedTableRows = rows;
-    const invoiceSelectionHeader = pageName === 'invoices' ? '<th style="width:42px"><input id="invoice-select-all" class="form-check-input" type="checkbox" aria-label="Chọn tất cả hóa đơn có thể xóa"></th>' : '';
-    const header = invoiceSelectionHeader + config.columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const bulkConfig = bulkDeleteConfigs[pageName];
+    const selectionHeader = bulkConfig ? '<th style="width:42px"><input id="table-select-all" class="form-check-input" type="checkbox" aria-label="Chọn tất cả mục"></th>' : '';
+    const header = selectionHeader + config.columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('');
     const body = rows.length
-      ? rows.map((row) => { const canDelete = pageName === 'invoices' && (Boolean(row.session_token) || row.status === 'PENDING_SYNC'); const selection = pageName === 'invoices' ? `<td><input class="form-check-input invoice-select" type="checkbox" ${canDelete ? '' : 'disabled'} ${row.session_token ? `data-token="${escapeHtml(row.session_token)}"` : row.invoice_id ? `data-id="${escapeHtml(row.invoice_id)}"` : ''} aria-label="${canDelete ? 'Chọn để xóa' : 'Hóa đơn đã đồng bộ không thể xóa tại đây'}"></td>` : ''; return `<tr>${selection}${config.columns.map(([field, , formatter, html]) => {
+      ? rows.map((row) => { const deleteUrl = bulkConfig ? deleteUrlForRow(pageName, row) : ''; const selection = bulkConfig ? `<td><input class="form-check-input table-select" type="checkbox" data-delete-url="${escapeHtml(deleteUrl)}" aria-label="Chọn để xóa"></td>` : ''; return `<tr>${selection}${config.columns.map(([field, , formatter, html]) => {
         const value = formatter ? formatter(row[field], row) : row[field];
         return `<td>${html ? value : escapeHtml(value)}</td>`;
       }).join('')}</tr>`; }).join('')
-      : `<tr><td colspan="${config.columns.length + (pageName === 'invoices' ? 1 : 0)}" class="text-center text-secondary">Chưa có dữ liệu.</td></tr>`;
+      : `<tr><td colspan="${config.columns.length + (bulkConfig ? 1 : 0)}" class="text-center text-secondary">Chưa có dữ liệu.</td></tr>`;
 
     const activeFilters = new URLSearchParams(query || location.search);
     const selectedStatus = activeFilters.get('status') || '';
@@ -226,7 +238,7 @@ async function loadTable(pageName) {
       <div class="container-xl">
         ${invoiceFilters}
         <div id="table-feedback" class="mb-2" role="status"></div>
-        ${pageName === 'invoices' ? '<div class="d-flex align-items-center gap-3 mb-2"><button id="bulk-delete-invoices" class="btn btn-sm btn-outline-danger" data-action="bulk-delete-invoices" disabled>Xóa các mục đã chọn</button><span class="small text-secondary">Chỉ áp dụng cho phiên đang xử lý và hóa đơn chưa đồng bộ.</span></div>' : ''}
+        ${bulkConfig ? `<div class="d-flex align-items-center gap-3 mb-2"><button id="bulk-delete-records" class="btn btn-sm btn-outline-danger" data-action="bulk-delete-records" data-page="${escapeHtml(pageName)}" disabled>${escapeHtml(bulkConfig.label)}</button><span class="small text-secondary">${escapeHtml(bulkConfig.note)}</span></div>` : ''}
         <div class="card">
           <div class="table-responsive">
             <table class="table table-vcenter table-striped table-hover card-table">
@@ -237,8 +249,8 @@ async function loadTable(pageName) {
         </div>
       </div>`;
     document.querySelector('#invoice-filters')?.addEventListener('submit', (event) => { event.preventDefault(); loadTable('invoices'); });
-    if (pageName === 'invoices') {
-      const selectable = [...document.querySelectorAll('.invoice-select:not(:disabled)')]; const selectAll = document.querySelector('#invoice-select-all'); const bulkButton = document.querySelector('#bulk-delete-invoices');
+    if (bulkConfig) {
+      const selectable = [...document.querySelectorAll('.table-select')]; const selectAll = document.querySelector('#table-select-all'); const bulkButton = document.querySelector('#bulk-delete-records');
       const updateSelection = () => { const selected = selectable.filter((input) => input.checked); bulkButton.disabled = !selected.length; selectAll.checked = selectable.length > 0 && selected.length === selectable.length; selectAll.indeterminate = selected.length > 0 && selected.length < selectable.length; };
       selectAll.disabled = !selectable.length; selectAll.addEventListener('change', () => { selectable.forEach((input) => { input.checked = selectAll.checked; }); updateSelection(); }); selectable.forEach((input) => input.addEventListener('change', updateSelection));
     }
@@ -257,12 +269,14 @@ async function handleTableAction(event) {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const action = button.dataset.action;
   if (action === 'edit-record') { openEditModal(button.dataset.type, button.dataset.id); return; }
-  if (action === 'bulk-delete-invoices') {
-    const selected = [...document.querySelectorAll('.invoice-select:checked')]; if (!selected.length) return;
-    if (!await SapiUI.confirmAction(`Xóa ${selected.length} mục đã chọn? Thao tác chỉ xóa phiên hoặc hóa đơn chưa đồng bộ.`, { title: 'Xóa nhiều hóa đơn', confirmLabel: 'Xóa các mục' })) return;
+  if (action === 'bulk-delete-records') {
+    const selected = [...document.querySelectorAll('.table-select:checked')]; if (!selected.length) return;
+    const pageName = button.dataset.page; const isInvoice = pageName === 'invoices';
+    const message = isInvoice ? `Xóa ${selected.length} mục khỏi SAPI? Phiếu đã tạo trên KiotViet sẽ không bị xóa và dữ liệu đối chiếu vẫn được giữ lại.` : `Xóa ${selected.length} dữ liệu đối chiếu đã chọn? Hàng hóa và nhà cung cấp gốc không bị xóa.`;
+    if (!await SapiUI.confirmAction(message, { title: isInvoice ? 'Xóa dữ liệu hóa đơn' : 'Xóa dữ liệu đối chiếu', confirmLabel: 'Xóa các mục' })) return;
     button.disabled = true; button.textContent = 'Đang xóa…'; const failures = [];
-    for (const input of selected) { const url = input.dataset.token ? `/api/invoice-sessions/${encodeURIComponent(input.dataset.token)}` : `/api/invoices/${encodeURIComponent(input.dataset.id)}`; try { const response = await fetch(url, { method: 'DELETE' }); const payload = response.status === 204 ? {} : await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`); } catch (error) { failures.push(error.message); } }
-    await loadTable('invoices'); if (failures.length) { const feedback = document.querySelector('#table-feedback'); feedback.className = 'alert alert-warning mb-2'; feedback.textContent = `Đã xóa ${selected.length - failures.length}/${selected.length} mục. ${failures.join(' ')}`; } else SapiUI.notify(`Đã xóa ${selected.length} mục.`); return;
+    for (const input of selected) { try { const response = await fetch(input.dataset.deleteUrl, { method: 'DELETE' }); const payload = response.status === 204 ? {} : await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`); } catch (error) { failures.push(error.message); } }
+    await loadTable(pageName); if (failures.length) { const feedback = document.querySelector('#table-feedback'); feedback.className = 'alert alert-warning mb-2'; feedback.textContent = `Đã xóa ${selected.length - failures.length}/${selected.length} mục. ${failures.join(' ')}`; } else SapiUI.notify(`Đã xóa ${selected.length} mục.`); return;
   }
   if (action.startsWith('cancel') && !await SapiUI.confirmAction('Hủy hóa đơn này? Dữ liệu của hóa đơn hoặc phiên nhập chưa hoàn tất sẽ bị xóa.', { title: 'Hủy hóa đơn', confirmLabel: 'Hủy hóa đơn' })) return;
   const feedback = document.querySelector('#table-feedback'); const original = button.textContent; button.disabled = true;
