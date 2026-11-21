@@ -10,7 +10,7 @@ const originalFetch = global.fetch;
 global.fetch = () => { throw new Error('Network is forbidden in the offline experiment test.'); };
 const key = 'offline-secret-must-not-appear';
 let captures = [];
-const baseInvoice = () => ({ supplier: { name: 'Cửa hàng thử, "Bánh kẹo"', phone: null, address: 'Địa chỉ\nDòng 2', tax_code: '123' }, invoice: { number: '0001', date: null }, items: [{ name: 'Bánh "kẹo", xoài\n180g', quantity: 2, unit: 'Gói', package_quantity: null, package_unit: null, unit_price: 11, price_unit: 'Gói', total_price: 999, line_type: 'PRODUCT', line_status: 'ACTIVE', status_reason: null }], promotions: [], total_amount: 777.88 });
+const baseInvoice = () => ({ document_type: 'PRINTED', legibility: 'CLEAR', supplier: { name: 'Cửa hàng thử, "Bánh kẹo"', phone: null, address: 'Địa chỉ\nDòng 2', tax_code: '123' }, invoice: { number: '0001', date: null }, items: [{ name: 'Bánh "kẹo", xoài\n180g', quantity: 2, unit: 'Gói', package_quantity: null, package_unit: null, unit_price: 11, price_unit: 'Gói', total_price: 999, line_type: 'PRODUCT', line_status: 'ACTIVE', status_reason: null }], promotions: [], total_amount: 777.88 });
 require.cache[sdkPath].exports = { ...sdk, GoogleGenAI: class {
   constructor() { this.models = { generateContent: async (request) => {
     captures.push(request);

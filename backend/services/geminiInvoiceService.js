@@ -2,12 +2,22 @@ const { createGeminiClient, getGeminiEndpointSettings, redactGeminiSecrets } = r
 const { invoiceExtractionPrompt, getInvoicePrompt, getInvoicePromptPlan } = require('./geminiInvoicePrompt');
 
 const LAYOUT_TYPES = ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'];
+const DOCUMENT_TYPES = ['PRINTED', 'HANDWRITTEN', 'MIXED', 'UNKNOWN'];
+const LEGIBILITY_LEVELS = ['CLEAR', 'PARTIAL', 'UNREADABLE'];
 
 // This is the application's standardized Gemini response. Do not rename fields without a migration.
 const invoiceSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
+    document_type: {
+      type: 'string', enum: DOCUMENT_TYPES,
+      description: 'Whether transaction content is printed, handwritten, mixed, or uncertain.',
+    },
+    legibility: {
+      type: 'string', enum: LEGIBILITY_LEVELS,
+      description: 'Overall confidence that the visible writing can be read without guessing.',
+    },
     layout_type: {
       type: 'string',
       enum: ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'],
@@ -73,7 +83,7 @@ const invoiceSchema = {
       required: ['description', 'amount'] } },
     total_amount: { type: ['number', 'null'] },
   },
-  required: ['layout_type', 'supplier', 'invoice', 'items', 'promotions', 'total_amount'],
+  required: ['document_type', 'legibility', 'layout_type', 'supplier', 'invoice', 'items', 'promotions', 'total_amount'],
 };
 
 class GeminiInvoiceError extends Error {
@@ -216,6 +226,8 @@ function validateInvoice(payload) {
     throw new GeminiInvoiceError('Gemini trả về hóa đơn không đúng schema.');
   }
   return {
+    document_type: DOCUMENT_TYPES.includes(payload.document_type) ? payload.document_type : 'UNKNOWN',
+    legibility: LEGIBILITY_LEVELS.includes(payload.legibility) ? payload.legibility : 'PARTIAL',
     layout_type: LAYOUT_TYPES.includes(payload.layout_type) ? payload.layout_type : 'UNKNOWN',
     supplier: {
       name: nullableString(payload.supplier.name, 'supplier.name'),

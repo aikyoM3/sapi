@@ -117,7 +117,9 @@ async function createClient(config) {
 
 function buildPurchaseOrderPayload({ branchId, supplier, discount, total, paidAmount, items, invoiceNumber }) {
   return {
-    ...(invoiceNumber ? { code: invoiceNumber } : {}),
+    // Leave `code` absent so KiotViet generates the purchase-receipt code.
+    // The number printed by the supplier belongs to the outbound-invoice field.
+    ...(invoiceNumber ? { invoiceNumber } : {}),
     purchaseDate: new Date().toISOString(),
     branchId,
     supplier: {

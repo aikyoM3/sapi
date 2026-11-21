@@ -7,6 +7,8 @@ const detailedInvoiceExtractionPrompt = `Bạn là hệ thống trích xuất d�
 Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và trả về DUY NHẤT một JSON object theo schema sau:
 
 {
+  "document_type": "PRINTED" | "HANDWRITTEN" | "MIXED" | "UNKNOWN",
+  "legibility": "CLEAR" | "PARTIAL" | "UNREADABLE",
   "layout_type": "SINGLE_UNIT_COLUMN" | "SPLIT_QUANTITY_COLUMNS" | "FREE_FORM" | "UNKNOWN",
   "supplier": {
     "name": string | null,
@@ -44,6 +46,13 @@ Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và tr�
 }
 
 QUY TẮC:
+
+0. PHÂN LOẠI VÀ CHẾ ĐỘ VIẾT TAY
+- document_type=PRINTED khi nội dung giao dịch chính được in; HANDWRITTEN khi các dòng hàng chính được viết tay; MIXED khi phải kết hợp phần in và viết tay; UNKNOWN khi không chắc.
+- legibility=CLEAR khi đọc chắc phần lớn nội dung; PARTIAL khi chỉ đọc chắc một phần; UNREADABLE khi không thể đọc đáng tin cậy các dòng hàng.
+- Với HANDWRITTEN hoặc MIXED, ưu tiên nhận dạng chữ theo từng dòng/cụm và cấu trúc đơn giản thường gặp: tên hàng, số lượng nếu có, đơn giá, thành tiền, rồi tổng tiền phía dưới. Đây chỉ là gợi ý bố cục, không được tự tạo field không xuất hiện.
+- Chữ viết tay có thể lệch cột hoặc không có đường bảng. Dùng vị trí, khoảng cách và quan hệ theo hàng để gắn số với tên hàng; nếu không chắc số thuộc field nào thì để field đó null.
+- Nếu chỉ đọc được một phần, trả ngay dữ liệu chắc chắn với legibility=PARTIAL và phần không đọc được=null. Nếu không đọc được đáng tin cậy, trả schema hợp lệ với legibility=UNREADABLE, items=[] và các field không rõ=null; không kéo dài suy luận và không đoán chữ.
 
 1. supplier
 - name: tên nhà cung cấp/người bán xuất hiện trên hóa đơn.
@@ -161,7 +170,12 @@ Không thực hiện supplier mapping.
 - Các giá trị không xác định phải là null.
 `;
 
-const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như các trang của CÙNG MỘT hóa đơn mua hàng và chỉ trả JSON đúng response schema. Không Markdown, không giải thích, không bịa; thiếu hoặc không chắc thì null, array không có dữ liệu thì []. layout_type là SINGLE_UNIT_COLUMN khi có cột ĐVT riêng, SPLIT_QUANTITY_COLUMNS khi số lượng chia cột đơn vị, FREE_FORM khi viết tự do, nếu không chắc là UNKNOWN.
+const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như các trang của CÙNG MỘT hóa đơn mua hàng và chỉ trả JSON đúng response schema. Không Markdown, không giải thích, không bịa; thiếu hoặc không chắc thì null, array không có dữ liệu thì []. document_type là PRINTED, HANDWRITTEN, MIXED hoặc UNKNOWN; legibility là CLEAR, PARTIAL hoặc UNREADABLE. layout_type là SINGLE_UNIT_COLUMN khi có cột ĐVT riêng, SPLIT_QUANTITY_COLUMNS khi số lượng chia cột đơn vị, FREE_FORM khi viết tự do, nếu không chắc là UNKNOWN.
+
+0. Chế độ viết tay
+- Nếu dòng giao dịch chính viết tay, tự chuyển sang cách đọc HANDWRITTEN/MIXED: nhận dạng theo từng dòng hoặc cụm, ưu tiên tên hàng, số lượng nếu có, đơn giá, thành tiền và tổng phía dưới. Không giả định mọi phiếu đều có đủ các field này.
+- Chữ có thể lệch cột hoặc không có đường bảng; chỉ gắn số với tên hàng khi vị trí/ngữ cảnh đủ rõ. Field mơ hồ để null.
+- Nếu chỉ đọc chắc một phần, trả ngay phần chắc chắn với legibility=PARTIAL. Nếu không thể đọc đáng tin cậy, trả schema hợp lệ với legibility=UNREADABLE, items=[] và các field chưa rõ=null; không cố đoán hoặc kéo dài suy luận.
 
 1. Bên bán và chứng từ
 - supplier là BÊN BÁN, không lấy thông tin người mua/cửa hàng trong ngữ cảnh hệ thống. Giữ nguyên tên, điện thoại, địa chỉ, MST đọc được.

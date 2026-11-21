@@ -4,6 +4,11 @@ const { loadGeminiConnection } = require('./geminiConnectionService');
 const { mapExtractedInvoice } = require('./invoiceMappingService');
 const { inspectInvoice, readingsAgree } = require('./invoiceSanityService');
 
+function shouldVerifyInspection(firstInspection, invoice) {
+  const handwritten = ['HANDWRITTEN', 'MIXED'].includes(invoice?.document_type);
+  return firstInspection.needsVerification && !handwritten && process.env.GEMINI_VERIFY_SUSPICIOUS !== 'false';
+}
+
 async function processInvoiceSession(pool, session, extractionOptions = {}) {
   const { rows } = await pool.query(
     'SELECT image_path, mime_type FROM invoicesessionimage WHERE invoice_session_id = $1 ORDER BY page_number',
@@ -26,7 +31,10 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
     verification: firstInspection.needsVerification ? { status: 'NOT_RUN' } : { status: 'NOT_NEEDED' },
   };
 
-  if (firstInspection.needsVerification && process.env.GEMINI_VERIFY_SUSPICIOUS !== 'false') {
+  // Handwriting is returned for human review after one reading. Repeating a
+  // difficult handwritten image adds latency without making it authoritative.
+  const isHandwritten = ['HANDWRITTEN', 'MIXED'].includes(reviewedInvoice.document_type);
+  if (shouldVerifyInspection(firstInspection, reviewedInvoice)) {
     try {
       const verificationDetails = await extractInvoiceFromImagesDetailed(files, {
         ...extractionOptions,
@@ -60,6 +68,7 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
     }
   } else if (firstInspection.needsVerification) {
     reviewedInvoice = details.invoice;
+    if (isHandwritten) sanity.verification = { status: 'SKIPPED_HANDWRITING' };
   }
 
   // Batch sessions intentionally defer catalog lookup until the user opens the
@@ -80,4 +89,4 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
   return { updated: updated.rowCount === 1, details };
 }
 
-module.exports = { processInvoiceSession };
+module.exports = { processInvoiceSession, shouldVerifyInspection };

@@ -12,7 +12,7 @@ const savedFetch = global.fetch;
 const requests = [];
 const gatewayKey = 'sk-OFFLINE_TEST_ONLY_NOT_A_REAL_CREDENTIAL';
 const googleKey = 'AIzaOFFLINE_TEST_ONLY_NOT_A_REAL_CREDENTIAL';
-const fixture = { supplier: { name: null, phone: null, address: null, tax_code: null }, invoice: { number: null, date: null }, items: [], promotions: [], total_amount: null };
+const fixture = { document_type: 'PRINTED', legibility: 'CLEAR', supplier: { name: null, phone: null, address: null, tax_code: null }, invoice: { number: null, date: null }, items: [], promotions: [], total_amount: null };
 let failureStatus = null;
 let googleFailureStatus = null;
 let invalidCompactOnce = false;
@@ -32,6 +32,8 @@ async function main() {
   for (const prompt of [compactInvoiceExtractionPrompt, detailedInvoiceExtractionPrompt]) {
     assert.match(prompt, /Tự nhận diện quy cách/);
     assert.match(prompt, /nhãn, tiêu đề, cột và cấu trúc bảng/);
+    assert.match(prompt, /HANDWRITTEN/);
+    assert.match(prompt, /UNREADABLE/);
     assert.doesNotMatch(prompt, /\b(?:Thùng|Lẻ|Gói)\b|QC\s*=\s*\d|776100|2587/,
       'Prompt OCR không được hard-code đơn vị hoặc số liệu của một hóa đơn cụ thể.');
   }

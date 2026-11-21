@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { inspectInvoice, readingsAgree } = require('../services/invoiceSanityService');
+const { shouldVerifyInspection } = require('../services/invoiceSessionProcessingService');
 
 const invoice = {
   layout_type: 'SPLIT_QUANTITY_COLUMNS',
@@ -22,6 +23,9 @@ assert.equal(readingsAgree(first.invoice, inspectInvoice(structuredClone(invoice
 const different = structuredClone(invoice);
 different.items[0].quantity_cells = [{ sub_header: 'Thùng', value: null }, { sub_header: 'Lẻ', value: 10 }];
 assert.equal(readingsAgree(first.invoice, inspectInvoice(different).invoice), false);
+assert.equal(shouldVerifyInspection(first, { document_type: 'PRINTED' }), true);
+assert.equal(shouldVerifyInspection(first, { document_type: 'HANDWRITTEN' }), false);
+assert.equal(shouldVerifyInspection(first, { document_type: 'MIXED' }), false);
 
 const mixed = structuredClone(invoice);
 mixed.items[0].quantity_cells = [{ sub_header: 'Thùng', value: 2 }, { sub_header: 'Lẻ', value: 5 }];

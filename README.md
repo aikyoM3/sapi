@@ -103,6 +103,8 @@ Kiểm tra kết nối thật (gửi một yêu cầu văn bản ngắn, có th�
 
 ```json
 {
+  "document_type": "PRINTED | HANDWRITTEN | MIXED | UNKNOWN",
+  "legibility": "CLEAR | PARTIAL | UNREADABLE",
   "supplier": { "name": null, "phone": null, "address": null, "tax_code": null },
   "invoice": { "number": null, "date": null },
     "items": [{ "name": null, "quantity": null, "unit": null, "package_quantity": null, "package_unit": null, "unit_price": null, "price_unit": null, "total_price": null, "line_type": "PRODUCT", "line_status": "ACTIVE", "status_reason": null }],
@@ -110,6 +112,8 @@ Kiểm tra kết nối thật (gửi một yêu cầu văn bản ngắn, có th�
   "total_amount": null
 }
 ```
+
+Với chứng từ viết tay hoặc kết hợp in/viết tay, model trả dữ liệu đọc chắc chắn trong một lượt và để `null` cho phần không rõ. SAPI không chạy lượt kiểm chứng thứ hai cho loại này; người dùng kiểm tra và bổ sung trên trang sửa hóa đơn.
 
 5. The application scopes supplier/product mapping to the logged-in account. Product autocomplete searches product names, codes, and external names with a debounce.
 6. **Sửa hóa đơn** giữ riêng JSON OCR gốc và dữ liệu đã qua kiểm tra để sử dụng. Schema giữ các cột số lượng thô (ví dụ `Thùng`/`Lẻ`); backend kiểm tra quan hệ số lượng–quy cách–đơn giá–thành tiền. Khi phát hiện nghi vấn, hệ thống đọc kiểm chứng lần hai và chỉ áp dụng chuẩn hóa nếu hai lượt nhất quán; nếu khác nhau thì giữ lượt đầu và cảnh báo người dùng. Dòng `CANCELLED` bị loại khỏi nhập hàng; dòng `UNCERTAIN` được tô cảnh báo.
@@ -170,7 +174,8 @@ Hướng dẫn script chạy tuần tự 26 ảnh, lưu JSON từng ảnh, tiế
 - Đổi mật khẩu cần mật khẩu hiện tại, mật khẩu mới (ít nhất 8 ký tự, tối đa 72 byte UTF-8) và xác nhận trùng khớp. Backend băm bằng bcrypt, giữ phiên hiện tại và đăng xuất các phiên khác của tài khoản. Endpoint: `PUT /api/auth/password`.
 - Trang sửa hóa đơn có nút **Xóa** trên từng dòng, kèm modal xác nhận. Sau khi xóa, STT và tổng tiền cập nhật; dòng bị xóa không nằm trong payload xác nhận, không tạo mapping hoặc gửi KiotViet. JSON OCR gốc vẫn được giữ để đối chiếu.
 - Mọi thay đổi trên trang sửa hóa đơn được tự lưu vào `localStorage` theo phiên sau khoảng 700 ms và khi rời tab. Mở lại đúng phiên trên cùng trình duyệt sẽ khôi phục nhà cung cấp, hàng đã chọn, các giá trị đã sửa và cả các dòng đã xóa; bản nháp bị xóa sau khi xác nhận thành công.
-- Thuế có thể nhập theo `%` hoặc `VND`; SAPI lưu riêng và phân bổ vào đơn giá dòng khi gửi KiotViet. Tiền trả nhà cung cấp được gửi qua `paidAmount`; số hóa đơn được dùng làm mã phiếu KiotViet khi có. Giới hạn và cách trình bày trong báo cáo được ghi tại `docs/KIOTVIET_TAX_LIMITATION.md`.
+- Thuế có thể nhập theo `%` hoặc `VND`; SAPI lưu riêng và phân bổ vào đơn giá dòng khi gửi KiotViet. Tiền trả nhà cung cấp được gửi qua `paidAmount`. Giới hạn và cách trình bày trong báo cáo được ghi tại `docs/KIOTVIET_TAX_LIMITATION.md`.
+- Khi gửi KiotViet, số hóa đơn nhà cung cấp được truyền vào `invoiceNumber` (mã hóa đơn xuất); SAPI không truyền `code`, để KiotViet tự sinh mã phiếu nhập.
 - Danh sách hóa đơn hỗ trợ chọn và xóa hàng loạt dữ liệu cục bộ để kiểm thử. Thao tác không xóa phiếu trên KiotViet và không xóa ProductMapping/SupplierMapping. Hai trang dữ liệu đối chiếu cũng hỗ trợ chọn nhiều để chỉ xóa các liên kết đã chọn, không xóa danh mục gốc.
 - Không thể xác nhận hóa đơn rỗng, số lượng/đơn giá chưa điền hoặc chiết khấu lớn hơn tổng tiền hàng.
 - Thông báo thành công ngắn dùng toast; lỗi cần xử lý được giữ trong trang; thao tác hủy/xóa dùng modal. Các helper trong `frontend/app.js` không phụ thuộc JavaScript của Tabler/Bootstrap.

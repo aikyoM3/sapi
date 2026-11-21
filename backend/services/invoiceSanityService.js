@@ -99,6 +99,8 @@ function inspectInvoice(invoice) {
 
 function comparisonShape(invoice) {
   return {
+    document_type: invoice.document_type,
+    legibility: invoice.legibility,
     layout_type: invoice.layout_type,
     items: (invoice.items || []).map((item) => ({
       name: normalizedText(item.name),

@@ -14,7 +14,8 @@ const payload = buildPurchaseOrderPayload({
 const after = Date.now();
 
 assert.equal(payload.isDraft, 0);
-assert.equal(payload.code, 'OFFLINE');
+assert.equal(payload.invoiceNumber, 'OFFLINE');
+assert.equal('code' in payload, false, 'KiotViet must generate the purchase-receipt code.');
 assert.equal(payload.paidAmount, 40);
 assert(Date.parse(payload.purchaseDate) >= before && Date.parse(payload.purchaseDate) <= after);
 console.log('PASS: KiotViet purchase receipt is finalized and uses the send timestamp.');
