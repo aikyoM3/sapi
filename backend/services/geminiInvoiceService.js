@@ -34,7 +34,7 @@ const invoiceSchema = {
         properties: {
           name: { type: ['string', 'null'] },
           quantity: { type: ['number', 'null'], description: 'Quantity printed for this line; do not multiply it by the package factor.' },
-          unit: { type: ['string', 'null'], description: 'Copy the unit label from this invoice line exactly. Never infer or rename it from packaging or arithmetic.' },
+          unit: { type: ['string', 'null'], description: 'Unit from the exact quantity column containing the number. In split columns such as Thùng/Lẻ, use that column header; never substitute the price unit.' },
           package_quantity: { type: ['number', 'null'], description: 'Explicit package/bulk factor only; null when no factor is shown.' },
           package_unit: { type: ['string', 'null'], description: 'Explicit child/package unit only; null when it is not shown clearly.' },
           unit_price: { type: ['number', 'null'], description: 'Price printed for the line; do not convert it to force quantity multiplied by price.' },

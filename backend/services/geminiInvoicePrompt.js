@@ -92,13 +92,14 @@ Sau khi xác định các mục hàng thực tế còn hiệu lực, tạo một
 
 - name: tên hàng hóa được ghi trên hóa đơn.
 - quantity: số lượng.
-- unit: giữ đúng đơn vị được ghi cho dòng hàng; không đổi "Lẻ" thành "Thùng" hoặc ngược lại chỉ dựa vào quy cách hay phép tính.
+- unit: lấy từ đúng tiêu đề cột chứa quantity. Nếu bảng "Số lượng" tách thành các cột con "Thùng" và "Lẻ", số nằm dưới cột nào thì unit là tên cột đó. Không dùng đơn vị áp dụng cho đơn giá để thay cho unit.
 - package_quantity và package_unit: hệ số/quy cách đóng gói được ghi rõ, ví dụ quy cách 30 Gói thì package_quantity=30, package_unit="Gói". Không suy đoán chỉ từ kiến thức sản phẩm.
 - unit_price: giữ nguyên đơn giá in/viết trên hóa đơn.
 - price_unit: đơn vị mà unit_price áp dụng. Không mặc định unit_price áp dụng cho unit của quantity.
 - total_price: ưu tiên giữ nguyên thành tiền được in/viết trên dòng. Không thay bằng quantity × unit_price khi đơn giá áp dụng theo đơn vị con.
 - line_type: PRODUCT với hàng mua thông thường; PROMOTION_ITEM với hàng tặng thực tế có tên và số lượng.
-- Nếu dòng ghi quantity=10, unit="Lẻ", quy cách 30 Gói, đơn giá 2.587 và thành tiền 776.100 thì giữ quantity=10, unit="Lẻ", package_quantity=30, package_unit="Gói", unit_price=2587 và total_price=776100. Chỉ đặt price_unit="Gói" khi chứng từ thể hiện rõ giá áp dụng theo Gói; nếu không thì null. Không tự đổi unit thành "Thùng" dù phép tính có hệ số quy cách.
+- Ví dụ bảng có QC=30, số 10 nằm dưới cột "Thùng", cột "Lẻ" trống, tên hàng ghi 30 Gói, đơn giá 2.587 và thành tiền 776.100: trả quantity=10, unit="Thùng", package_quantity=30, package_unit="Gói", unit_price=2587, price_unit="Gói", total_price=776100. Vị trí số dưới cột "Thùng" quyết định unit; quan hệ QC và thành tiền chỉ giúp xác định price_unit.
+- Nếu số nằm dưới cột "Lẻ" thì unit="Lẻ". Luôn quan sát đường kẻ và tiêu đề cột theo chiều dọc trước khi đọc đơn vị; không chuyển số sang cột bên cạnh dựa trên phép tính.
 - Trường hợp thông thường không có quy cách, ví dụ 10 Cái × 2.587 = 25.870, giữ unit="Cái", package_quantity/package_unit=null, unit_price=2587 và total_price=25870.
 - Nếu các cột không đủ rõ để biết quan hệ đơn vị, để package_quantity/package_unit/price_unit là null và vẫn giữ total_price đọc được.
 
@@ -163,10 +164,10 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 - Hàng mua thường: PRODUCT. Hàng tặng có tên và số lượng: PROMOTION_ITEM. Chương trình, chiết khấu hay điều chỉnh không phải hàng tồn kho: đưa vào promotions, không tạo item.
 
 3. Giữ nguyên quan hệ số lượng–đơn vị–quy cách–giá
-- name, quantity, unit và unit_price giữ đúng cột/nhãn trên chứng từ; không đổi unit dựa vào kiến thức sản phẩm hoặc phép tính.
+- name, quantity, unit và unit_price giữ đúng cột/nhãn trên chứng từ. Nếu "Số lượng" có cột con "Thùng"/"Lẻ", số nằm dưới cột nào thì unit là tên cột đó; quan sát đường kẻ theo chiều dọc, không lấy đơn vị của giá làm unit.
 - package_quantity/package_unit chỉ ghi hệ số quy cách nhìn thấy rõ. price_unit chỉ ghi khi chứng từ thể hiện rõ đơn giá áp dụng cho đơn vị nào; không rõ thì null.
 - total_price ưu tiên số thành tiền in/viết trên dòng, không ép thành quantity × unit_price. Thành tiền có thể là quantity × package_quantity × unit_price nếu bố cục chứng từ thể hiện quan hệ đó.
-- Ví dụ đặc biệt: quantity=10, unit="Lẻ", quy cách 30 Gói, unit_price=2587, total_price=776100 thì giữ nguyên các giá trị đó; không đổi unit thành "Thùng". Trường hợp thường 10 Cái × 2587 = 25870 và không có quy cách thì package_quantity/package_unit=null.
+- Ví dụ: QC=30, số 10 ở cột "Thùng", cột "Lẻ" trống, tên hàng ghi 30 Gói, unit_price=2587 và total_price=776100 thì trả quantity=10, unit="Thùng", package_quantity=30, package_unit="Gói", price_unit="Gói". Nếu số ở cột "Lẻ" thì unit="Lẻ". Trường hợp thường 10 Cái × 2587 = 25870 và không có quy cách thì package_quantity/package_unit=null.
 - Không suy ra field còn thiếu bằng cách tính ngược. Không lấy dữ liệu của tờ khác lọt vào ảnh.
 
 4. Tổng và điều chỉnh

@@ -6,6 +6,10 @@ const { KiotVietError } = require('../kiotviet');
 
 const router = express.Router();
 const searchTerm = (value) => String(value || '').trim().slice(0, 100);
+const searchTokens = (value) => [...new Set(searchTerm(value)
+  .toLocaleLowerCase('vi-VN')
+  .split(/[^\p{L}\p{N}]+/u)
+  .filter(Boolean))].slice(0, 12);
 const textField = (value, max = 255) => String(value ?? '').trim().slice(0, max);
 const optionalPositiveNumber = (value) => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
@@ -112,19 +116,29 @@ module.exports = function dataRoutes(pool) {
     try {
       const query = searchTerm(req.query.q);
       if (query.length < 2) return res.json([]);
+      const tokens = searchTokens(query);
       const { rows } = await pool.query(`
         SELECT p.product_id, p.product_code, p.product_name, p.primary_unit,
                ARRAY_REMOVE(ARRAY_AGG(DISTINCT pm.provider_product_name), NULL) AS matched_external_names
         FROM product p
         LEFT JOIN productmapping pm ON pm.local_product_id = p.product_id
         WHERE p.user_id = $1
-          AND (p.product_name ILIKE '%' || $2 || '%'
-            OR p.product_code ILIKE '%' || $2 || '%'
-            OR pm.provider_product_name ILIKE '%' || $2 || '%')
+          AND NOT EXISTS (
+            SELECT 1 FROM UNNEST($2::text[]) AS search_token
+            WHERE NOT (
+              p.product_name ILIKE '%' || search_token || '%'
+              OR COALESCE(p.product_code, '') ILIKE '%' || search_token || '%'
+              OR EXISTS (
+                SELECT 1 FROM productmapping pm_search
+                WHERE pm_search.local_product_id = p.product_id
+                  AND pm_search.provider_product_name ILIKE '%' || search_token || '%'
+              )
+            )
+          )
         GROUP BY p.product_id
-        ORDER BY CASE WHEN p.product_name ILIKE $2 || '%' THEN 0 ELSE 1 END, p.product_name
+        ORDER BY CASE WHEN p.product_name ILIKE $3 || '%' THEN 0 ELSE 1 END, p.product_name
         LIMIT 12
-      `, [currentUserId(req), query]);
+      `, [currentUserId(req), tokens, query]);
       res.json(rows);
     } catch (error) { next(error); }
   });
