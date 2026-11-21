@@ -168,6 +168,8 @@ Hướng dẫn script chạy tuần tự 26 ảnh, lưu JSON từng ảnh, tiế
 - Nút bánh răng trên navbar mở **Cài đặt**: cỡ chữ Nhỏ / Mặc định / Lớn và đổi mật khẩu. Cỡ chữ áp dụng ngay, lưu bằng `localStorage` trên trình duyệt hiện tại. Không lặp lại cấu hình kết nối trên navbar.
 - Đổi mật khẩu cần mật khẩu hiện tại, mật khẩu mới (ít nhất 8 ký tự, tối đa 72 byte UTF-8) và xác nhận trùng khớp. Backend băm bằng bcrypt, giữ phiên hiện tại và đăng xuất các phiên khác của tài khoản. Endpoint: `PUT /api/auth/password`.
 - Trang sửa hóa đơn có nút **Xóa** trên từng dòng, kèm modal xác nhận. Sau khi xóa, STT và tổng tiền cập nhật; dòng bị xóa không nằm trong payload xác nhận, không tạo mapping hoặc gửi KiotViet. JSON OCR gốc vẫn được giữ để đối chiếu.
+- Thuế có thể nhập theo `%` hoặc `VND`; SAPI lưu riêng và phân bổ vào đơn giá dòng khi gửi KiotViet. Tiền trả nhà cung cấp được gửi qua `paidAmount`; số hóa đơn được dùng làm mã phiếu KiotViet khi có. Giới hạn và cách trình bày trong báo cáo được ghi tại `docs/KIOTVIET_TAX_LIMITATION.md`.
+- Danh sách hóa đơn hỗ trợ chọn và xóa hàng loạt các phiên/hóa đơn chưa đồng bộ; hóa đơn đã đồng bộ không bị xóa cục bộ để tránh mất liên kết với KiotViet.
 - Không thể xác nhận hóa đơn rỗng, số lượng/đơn giá chưa điền hoặc chiết khấu lớn hơn tổng tiền hàng.
 - Thông báo thành công ngắn dùng toast; lỗi cần xử lý được giữ trong trang; thao tác hủy/xóa dùng modal. Các helper trong `frontend/app.js` không phụ thuộc JavaScript của Tabler/Bootstrap.
 - Prompt phân biệt danh mục mẫu không dùng, hàng viết bổ sung và hàng bị gạch/sửa. Không thêm matching, không thay schema JSON hoặc schema database. Cần kiểm tra kết quả thực tế trên các mẫu đặc biệt; prompt không bảo đảm AI đọc đúng mọi ảnh.

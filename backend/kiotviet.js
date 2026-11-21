@@ -110,8 +110,9 @@ async function createClient(config) {
   };
 }
 
-function buildPurchaseOrderPayload({ branchId, supplier, discount, total, items, invoiceNumber }) {
+function buildPurchaseOrderPayload({ branchId, supplier, discount, total, paidAmount, items, invoiceNumber }) {
   return {
+    ...(invoiceNumber ? { code: invoiceNumber } : {}),
     purchaseDate: new Date().toISOString(),
     branchId,
     supplier: {
@@ -124,7 +125,7 @@ function buildPurchaseOrderPayload({ branchId, supplier, discount, total, items,
     // SAPI only marks an invoice as synced after creating a completed receipt.
     isDraft: 0,
     discount,
-    paidAmount: total,
+    paidAmount: paidAmount ?? total,
     paymentMethod: 'Cash',
     purchaseOrderDetails: items.map((item) => ({
       productCode: item.productCode,

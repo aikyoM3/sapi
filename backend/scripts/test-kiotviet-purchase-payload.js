@@ -7,11 +7,14 @@ const payload = buildPurchaseOrderPayload({
   supplier: { name: 'Offline supplier' },
   discount: 0,
   total: 100,
+  paidAmount: 40,
   invoiceNumber: 'OFFLINE',
   items: [{ productCode: 'OFFLINE', quantity: 1, unitPrice: 100 }],
 });
 const after = Date.now();
 
 assert.equal(payload.isDraft, 0);
+assert.equal(payload.code, 'OFFLINE');
+assert.equal(payload.paidAmount, 40);
 assert(Date.parse(payload.purchaseDate) >= before && Date.parse(payload.purchaseDate) <= after);
 console.log('PASS: KiotViet purchase receipt is finalized and uses the send timestamp.');

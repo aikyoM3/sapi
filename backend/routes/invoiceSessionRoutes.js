@@ -7,6 +7,7 @@ const { processInvoiceSession } = require('../services/invoiceSessionProcessingS
 const { requireAuth, currentUserId } = require('../middleware/auth');
 const { getMobileBaseUrl } = require('../services/lanAddress');
 const { loadConnectionConfig } = require('../services/kiotVietConnectionService');
+const { calculateInvoiceTax, pricesAfterTax, paidAmountForInvoice } = require('../services/invoiceTaxService');
 const { buildPurchaseOrderPayload, createPurchaseOrder } = require('../kiotviet');
 
 const router = express.Router();
@@ -351,6 +352,9 @@ module.exports = function invoiceSessionRoutes(pool) {
 
       const subtotal = normalized.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       if (discount > subtotal) throw Object.assign(new Error('Chiết khấu không được lớn hơn tổng tiền hàng.'), { statusCode: 400 });
+      const tax = calculateInvoiceTax({ subtotal, discount, taxMode: req.body.taxMode, taxValue: req.body.taxValue });
+      const paidAmount = paidAmountForInvoice(req.body.paidAmount, tax.totalAfterTax);
+      const taxedItems = pricesAfterTax(normalized, tax.taxAmount);
       const invoiceDate = req.body.invoiceDate ? new Date(req.body.invoiceDate) : null;
       if (invoiceDate && Number.isNaN(invoiceDate.getTime())) throw Object.assign(new Error('Ngày hóa đơn không hợp lệ.'), { statusCode: 400 });
       const branch = (await client.query('SELECT kiotviet_id FROM kiotvietbranch WHERE user_id = $1 ORDER BY branch_id LIMIT 1', [currentUserId(req)])).rows[0];
@@ -362,9 +366,10 @@ module.exports = function invoiceSessionRoutes(pool) {
           address: supplierRecord.address,
         },
         discount,
-        total: subtotal - discount,
+        total: tax.totalAfterTax,
+        paidAmount,
         invoiceNumber: safeText(req.body.invoiceNumber) || null,
-        items: normalized.map((item) => ({
+        items: taxedItems.map((item) => ({
           productCode: productsById.get(item.productId).product_code,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
@@ -380,11 +385,11 @@ module.exports = function invoiceSessionRoutes(pool) {
       catch (error) { kiotVietSyncError = error; }
       const invoice = await client.query(
         `INSERT INTO purchaseinvoice
-          (user_id, supplier_id, invoice_date, invoice_number, total_amount, discount_amount, status,
-           kiotviet_purchase_order_id, kiotviet_purchase_order_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING invoice_id`,
-        [currentUserId(req), supplierId, invoiceDate, safeText(req.body.invoiceNumber) || null, subtotal - discount, discount,
-          kiotVietOrder ? 'SYNCED' : 'PENDING_SYNC', kiotVietOrder?.id || null, kiotVietOrder?.code || null],
+          (user_id, supplier_id, invoice_date, invoice_number, total_amount, discount_amount,
+           tax_input_mode, tax_rate, tax_amount, paid_amount, status, kiotviet_purchase_order_id, kiotviet_purchase_order_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING invoice_id`,
+        [currentUserId(req), supplierId, invoiceDate, safeText(req.body.invoiceNumber) || null, tax.totalAfterTax, discount,
+          tax.taxMode, tax.taxRate, tax.taxAmount, paidAmount, kiotVietOrder ? 'SYNCED' : 'PENDING_SYNC', kiotVietOrder?.id || null, kiotVietOrder?.code || null],
       );
       for (const item of normalized) {
         await client.query(

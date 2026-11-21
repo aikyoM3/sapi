@@ -1,4 +1,5 @@
 const { loadConnectionConfig } = require('./kiotVietConnectionService');
+const { calculateInvoiceTax, pricesAfterTax, paidAmountForInvoice } = require('./invoiceTaxService');
 const { buildPurchaseOrderPayload, createPurchaseOrder, updatePurchaseOrder } = require('../kiotviet');
 
 function nonNegative(value, label) {
@@ -30,14 +31,19 @@ async function syncPurchaseInvoice(pool, userId, invoiceId) {
   }
   const branch = (await pool.query('SELECT kiotviet_id FROM kiotvietbranch WHERE user_id=$1 ORDER BY branch_id LIMIT 1', [userId])).rows[0];
   if (!branch) throw Object.assign(new Error('Chưa có chi nhánh KiotViet. Hãy đồng bộ dữ liệu trước.'), { statusCode: 409 });
+  const subtotal = items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unit_price), 0);
+  const tax = calculateInvoiceTax({ subtotal, discount: Number(invoice.discount_amount || 0), taxMode: 'VND', taxValue: Number(invoice.tax_amount || 0) });
+  const paidAmount = paidAmountForInvoice(invoice.paid_amount, tax.totalAfterTax);
+  const taxedItems = pricesAfterTax(items.map((item) => ({ productCode: item.product_code, quantity: Number(item.quantity), unitPrice: Number(item.unit_price) })), tax.taxAmount);
 
   const payload = buildPurchaseOrderPayload({
     branchId: Number(branch.kiotviet_id),
     supplier: { name: invoice.supplier_name, phone: invoice.phone_number, address: invoice.address },
     discount: Number(invoice.discount_amount || 0),
-    total: Number(invoice.total_amount),
+    total: tax.totalAfterTax,
+    paidAmount,
     invoiceNumber: invoice.invoice_number,
-    items: items.map((item) => ({ productCode: item.product_code, quantity: Number(item.quantity), unitPrice: Number(item.unit_price) })),
+    items: taxedItems,
   });
   const result = await createPurchaseOrder(await loadConnectionConfig(pool, userId), payload);
   await pool.query(`UPDATE purchaseinvoice SET status='SYNCED', kiotviet_purchase_order_id=$1,
@@ -72,15 +78,18 @@ async function updatePurchaseInvoice(pool, userId, invoiceId, body) {
     const byId = new Map(productsResult.rows.map((row) => [row.product_id, row]));
     const subtotal = normalized.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     if (discount > subtotal) throw Object.assign(new Error('Chiết khấu không được lớn hơn tổng tiền hàng.'), { statusCode: 400 });
+    const tax = calculateInvoiceTax({ subtotal, discount, taxMode: body.taxMode, taxValue: body.taxValue });
+    const paidAmount = paidAmountForInvoice(body.paidAmount, tax.totalAfterTax);
+    const taxedItems = pricesAfterTax(normalized, tax.taxAmount);
     if (invoice.status === 'SYNCED') {
       if (!invoice.kiotviet_purchase_order_id) throw Object.assign(new Error('Thiếu mã phiếu nhập KiotViet; không thể cập nhật an toàn.'), { statusCode: 409 });
       const branch = (await client.query('SELECT kiotviet_id FROM kiotvietbranch WHERE user_id=$1 ORDER BY branch_id LIMIT 1', [userId])).rows[0];
       if (!branch) throw Object.assign(new Error('Chưa có chi nhánh KiotViet. Hãy đồng bộ danh mục trước.'), { statusCode: 409 });
-      const payload = buildPurchaseOrderPayload({ branchId: Number(branch.kiotviet_id), supplier: { name: supplierResult.rows[0].supplier_name, phone: supplierResult.rows[0].phone_number, address: supplierResult.rows[0].address }, discount, total: subtotal - discount, invoiceNumber: cleanText(body.invoiceNumber) || null, items: normalized.map((item) => ({ productCode: byId.get(item.productId).product_code, quantity: item.quantity, unitPrice: item.unitPrice })) });
+      const payload = buildPurchaseOrderPayload({ branchId: Number(branch.kiotviet_id), supplier: { name: supplierResult.rows[0].supplier_name, phone: supplierResult.rows[0].phone_number, address: supplierResult.rows[0].address }, discount, total: tax.totalAfterTax, paidAmount, invoiceNumber: cleanText(body.invoiceNumber) || null, items: taxedItems.map((item) => ({ productCode: byId.get(item.productId).product_code, quantity: item.quantity, unitPrice: item.unitPrice })) });
       // KiotViet is updated first. If it rejects the update, no local data is changed.
       await updatePurchaseOrder(await loadConnectionConfig(pool, userId), invoice.kiotviet_purchase_order_id, payload);
     }
-    await client.query('UPDATE purchaseinvoice SET supplier_id=$1,invoice_date=$2,invoice_number=$3,total_amount=$4,discount_amount=$5 WHERE invoice_id=$6 AND user_id=$7', [supplierId, invoiceDate, cleanText(body.invoiceNumber) || null, subtotal - discount, discount, invoiceId, userId]);
+    await client.query('UPDATE purchaseinvoice SET supplier_id=$1,invoice_date=$2,invoice_number=$3,total_amount=$4,discount_amount=$5,tax_input_mode=$6,tax_rate=$7,tax_amount=$8,paid_amount=$9 WHERE invoice_id=$10 AND user_id=$11', [supplierId, invoiceDate, cleanText(body.invoiceNumber) || null, tax.totalAfterTax, discount, tax.taxMode, tax.taxRate, tax.taxAmount, paidAmount, invoiceId, userId]);
     await client.query('DELETE FROM purchaseinvoiceitem WHERE invoice_id=$1', [invoiceId]);
     for (const item of normalized) await client.query('INSERT INTO purchaseinvoiceitem(invoice_id,product_id,quantity,unit,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6)', [invoiceId, item.productId, item.quantity, item.unit, item.unitPrice, item.quantity * item.unitPrice]);
     await client.query('COMMIT');

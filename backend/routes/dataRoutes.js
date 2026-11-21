@@ -62,7 +62,7 @@ module.exports = function dataRoutes(pool) {
   router.get('/invoices/:id', async (req, res, next) => {
     try {
       const invoice = await pool.query(`SELECT pi.invoice_id,pi.invoice_number,pi.invoice_date,pi.total_amount,
-        pi.discount_amount,pi.status,pi.kiotviet_purchase_order_code,s.supplier_name
+        pi.discount_amount,pi.tax_input_mode,pi.tax_rate,pi.tax_amount,COALESCE(pi.paid_amount,pi.total_amount) AS paid_amount,pi.status,pi.kiotviet_purchase_order_code,s.supplier_name
         FROM purchaseinvoice pi LEFT JOIN supplier s ON s.supplier_id=pi.supplier_id
         WHERE pi.invoice_id=$1 AND pi.user_id=$2`, [req.params.id, currentUserId(req)]);
       if (!invoice.rowCount) return res.status(404).json({ error: 'Không tìm thấy hóa đơn.' });

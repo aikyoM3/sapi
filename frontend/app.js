@@ -71,7 +71,6 @@ const pageConfigs = {
       ['product_code', 'Mã hàng'],
       ['product_name', 'Tên hàng'],
       ['primary_unit', 'Đơn vị chính'],
-      ['quantity', 'Số lượng', formatAmount],
     ],
   },
   suppliers: {
@@ -87,7 +86,6 @@ const pageConfigs = {
     columns: [
       ['supplier_name', 'Nhà cung cấp'],
       ['local_product_name', 'Tên hàng nội bộ'],
-      ['provider_product_code', 'Mã hàng nhà cung cấp'],
       ['provider_product_name', 'Tên hàng nhà cung cấp'],
       ['provider_unit', 'Đơn vị nhà cung cấp'],
       ['local_unit', 'Đơn vị nội bộ'],
@@ -109,7 +107,7 @@ let loadedTableName = null;
 let loadedTableRows = [];
 let invoiceRefreshTimer = null;
 const editConfigs = {
-  mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductCode','provider_product_code','Mã hàng nhà cung cấp'],['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ'],['conversionRate','conversion_rate_to_local','Hệ số quy đổi sang đơn vị nội bộ','number']] },
+  mappings: { title: 'Chỉnh sửa dữ liệu đối chiếu', id: 'mapping_id', endpoint: '/api/product-mappings', fields: [['providerProductName','provider_product_name','Tên hàng nhà cung cấp'],['providerUnit','provider_unit','Đơn vị nhà cung cấp'],['localUnit','local_unit','Đơn vị nội bộ'],['conversionRate','conversion_rate_to_local','Hệ số quy đổi sang đơn vị nội bộ','number']] },
   supplierMappings: { title: 'Chỉnh sửa đối chiếu nhà cung cấp', id: 'supplier_mapping_id', endpoint: '/api/supplier-mappings', fields: [['providerSupplierName','provider_supplier_name','Tên nhà cung cấp trên hóa đơn']] },
 };
 
@@ -173,13 +171,14 @@ async function loadTable(pageName) {
     if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
     const rows = await response.json();
     loadedTableName = pageName; loadedTableRows = rows;
-    const header = config.columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('');
+    const invoiceSelectionHeader = pageName === 'invoices' ? '<th style="width:42px"><input id="invoice-select-all" class="form-check-input" type="checkbox" aria-label="Chọn tất cả hóa đơn có thể xóa"></th>' : '';
+    const header = invoiceSelectionHeader + config.columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('');
     const body = rows.length
-      ? rows.map((row) => `<tr>${config.columns.map(([field, , formatter, html]) => {
+      ? rows.map((row) => { const canDelete = pageName === 'invoices' && (Boolean(row.session_token) || row.status === 'PENDING_SYNC'); const selection = pageName === 'invoices' ? `<td><input class="form-check-input invoice-select" type="checkbox" ${canDelete ? '' : 'disabled'} ${row.session_token ? `data-token="${escapeHtml(row.session_token)}"` : row.invoice_id ? `data-id="${escapeHtml(row.invoice_id)}"` : ''} aria-label="${canDelete ? 'Chọn để xóa' : 'Hóa đơn đã đồng bộ không thể xóa tại đây'}"></td>` : ''; return `<tr>${selection}${config.columns.map(([field, , formatter, html]) => {
         const value = formatter ? formatter(row[field], row) : row[field];
         return `<td>${html ? value : escapeHtml(value)}</td>`;
-      }).join('')}</tr>`).join('')
-      : `<tr><td colspan="${config.columns.length}" class="text-center text-secondary">Chưa có dữ liệu.</td></tr>`;
+      }).join('')}</tr>`; }).join('')
+      : `<tr><td colspan="${config.columns.length + (pageName === 'invoices' ? 1 : 0)}" class="text-center text-secondary">Chưa có dữ liệu.</td></tr>`;
 
     const activeFilters = new URLSearchParams(query || location.search);
     const selectedStatus = activeFilters.get('status') || '';
@@ -188,6 +187,7 @@ async function loadTable(pageName) {
       <div class="container-xl">
         ${invoiceFilters}
         <div id="table-feedback" class="mb-2" role="status"></div>
+        ${pageName === 'invoices' ? '<div class="d-flex align-items-center gap-3 mb-2"><button id="bulk-delete-invoices" class="btn btn-sm btn-outline-danger" data-action="bulk-delete-invoices" disabled>Xóa các mục đã chọn</button><span class="small text-secondary">Chỉ áp dụng cho phiên đang xử lý và hóa đơn chưa đồng bộ.</span></div>' : ''}
         <div class="card">
           <div class="table-responsive">
             <table class="table table-vcenter table-striped table-hover card-table">
@@ -198,6 +198,11 @@ async function loadTable(pageName) {
         </div>
       </div>`;
     document.querySelector('#invoice-filters')?.addEventListener('submit', (event) => { event.preventDefault(); loadTable('invoices'); });
+    if (pageName === 'invoices') {
+      const selectable = [...document.querySelectorAll('.invoice-select:not(:disabled)')]; const selectAll = document.querySelector('#invoice-select-all'); const bulkButton = document.querySelector('#bulk-delete-invoices');
+      const updateSelection = () => { const selected = selectable.filter((input) => input.checked); bulkButton.disabled = !selected.length; selectAll.checked = selectable.length > 0 && selected.length === selectable.length; selectAll.indeterminate = selected.length > 0 && selected.length < selectable.length; };
+      selectAll.disabled = !selectable.length; selectAll.addEventListener('change', () => { selectable.forEach((input) => { input.checked = selectAll.checked; }); updateSelection(); }); selectable.forEach((input) => input.addEventListener('change', updateSelection));
+    }
     clearTimeout(invoiceRefreshTimer);
     if (pageName === 'invoices' && rows.some((row) => ['QUEUED','PROCESSING','RETRY_WAIT'].includes(row.status))) invoiceRefreshTimer = setTimeout(() => loadTable('invoices'), 5000);
   } catch (error) {
@@ -213,6 +218,13 @@ async function handleTableAction(event) {
   const button = event.target.closest('[data-action]'); if (!button) return;
   const action = button.dataset.action;
   if (action === 'edit-record') { openEditModal(button.dataset.type, button.dataset.id); return; }
+  if (action === 'bulk-delete-invoices') {
+    const selected = [...document.querySelectorAll('.invoice-select:checked')]; if (!selected.length) return;
+    if (!await SapiUI.confirmAction(`Xóa ${selected.length} mục đã chọn? Thao tác chỉ xóa phiên hoặc hóa đơn chưa đồng bộ.`, { title: 'Xóa nhiều hóa đơn', confirmLabel: 'Xóa các mục' })) return;
+    button.disabled = true; button.textContent = 'Đang xóa…'; const failures = [];
+    for (const input of selected) { const url = input.dataset.token ? `/api/invoice-sessions/${encodeURIComponent(input.dataset.token)}` : `/api/invoices/${encodeURIComponent(input.dataset.id)}`; try { const response = await fetch(url, { method: 'DELETE' }); const payload = response.status === 204 ? {} : await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`); } catch (error) { failures.push(error.message); } }
+    await loadTable('invoices'); if (failures.length) { const feedback = document.querySelector('#table-feedback'); feedback.className = 'alert alert-warning mb-2'; feedback.textContent = `Đã xóa ${selected.length - failures.length}/${selected.length} mục. ${failures.join(' ')}`; } else SapiUI.notify(`Đã xóa ${selected.length} mục.`); return;
+  }
   if (action.startsWith('cancel') && !await SapiUI.confirmAction('Hủy hóa đơn này? Dữ liệu của hóa đơn hoặc phiên nhập chưa hoàn tất sẽ bị xóa.', { title: 'Hủy hóa đơn', confirmLabel: 'Hủy hóa đơn' })) return;
   const feedback = document.querySelector('#table-feedback'); const original = button.textContent; button.disabled = true;
   if (action === 'sync-invoice') button.textContent = 'Đang đồng bộ…';
