@@ -1,5 +1,7 @@
 // Keep both versions so a shorter production prompt can be compared with the
 // original detailed rules without losing the known-good fallback.
+// Prompt policy: prefer document-wide rules; do not hard-code one invoice's
+// units, product names or numeric values unless a product requirement demands it.
 const detailedInvoiceExtractionPrompt = `Bạn là hệ thống trích xuất dữ liệu từ hóa đơn mua hàng bằng hình ảnh.
 
 Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và trả về DUY NHẤT một JSON object theo schema sau:
@@ -48,6 +50,7 @@ QUY TẮC:
 - Supplier luôn là BÊN BÁN/BÊN CUNG CẤP hàng hóa.
 - Tuyệt đối không lấy thông tin BÊN MUA/KHÁCH HÀNG/CỬA HÀNG NHẬN HÀNG làm supplier.
 - Nếu có nhiều ảnh, chúng là các trang liên tiếp của CÙNG MỘT hóa đơn; gộp item theo thứ tự trang và không tạo nhiều hóa đơn.
+- Không lặp lại dòng hàng bị cắt qua ranh giới trang; tiêu đề bảng, số trang, số chuyển tiếp và tổng mang sang không phải item.
 
 2. invoice
 - number: số hóa đơn nếu có.
@@ -88,20 +91,20 @@ D. Trạng thái dòng:
 - Không dùng khả năng đọc được tên và số làm bằng chứng ACTIVE. Nét gạch có thể vẫn để chữ bên dưới đọc được.
 - Kiểm tra lần cuối từng dòng sau khi đã đọc toàn bộ phần cuối phiếu. Nếu có mâu thuẫn, chọn UNCERTAIN thay vì ACTIVE.
 
-Sau khi xác định các mục hàng thực tế còn hiệu lực, tạo một object cho mỗi mục:
+Sau khi phân loại các dòng giao dịch, tạo một object cho mỗi mục, kể cả dòng CANCELLED/UNCERTAIN cần giữ làm dấu vết:
 
 - name: tên hàng hóa được ghi trên hóa đơn.
 - quantity: số lượng.
-- unit: lấy từ đúng tiêu đề cột chứa quantity. Nếu bảng "Số lượng" tách thành các cột con "Thùng" và "Lẻ", số nằm dưới cột nào thì unit là tên cột đó. Không dùng đơn vị áp dụng cho đơn giá để thay cho unit.
-- package_quantity và package_unit: hệ số/quy cách đóng gói được ghi rõ, ví dụ quy cách 30 Gói thì package_quantity=30, package_unit="Gói". Không suy đoán chỉ từ kiến thức sản phẩm.
+- unit: lấy từ nhãn hoặc tiêu đề gắn với chính ô quantity. Khi vùng số lượng có nhiều cột con theo đơn vị, lần theo đường kẻ/căn chỉnh tới tiêu đề của ô có số; không lấy tiêu đề cột bên cạnh hoặc đơn vị áp dụng cho giá.
+- Tự nhận diện quy cách từ nhãn, tiêu đề, cột và cấu trúc bảng. Chỉ đặt package_quantity khi chứng từ thể hiện rõ một hệ số đóng gói/quy đổi; chỉ đặt package_unit khi đơn vị con đi kèm hệ số được thể hiện rõ.
+- Con số hoặc đơn vị xuất hiện trong tên/mô tả sản phẩm không đủ để tự tạo quy cách nếu không có bằng chứng bố cục hỗ trợ. Kiến thức sản phẩm và phép tính thành tiền không phải bằng chứng duy nhất.
+- Nếu chứng từ không có quy cách rõ ràng hoặc quan hệ giữa các ô chưa chắc chắn, package_quantity và package_unit phải là null.
 - unit_price: giữ nguyên đơn giá in/viết trên hóa đơn.
-- price_unit: đơn vị mà unit_price áp dụng. Không mặc định unit_price áp dụng cho unit của quantity.
+- price_unit: đơn vị mà unit_price áp dụng, chỉ ghi khi nhãn/cấu trúc chứng từ thể hiện rõ; không mặc định trùng với unit hay package_unit.
 - total_price: ưu tiên giữ nguyên thành tiền được in/viết trên dòng. Không thay bằng quantity × unit_price khi đơn giá áp dụng theo đơn vị con.
 - line_type: PRODUCT với hàng mua thông thường; PROMOTION_ITEM với hàng tặng thực tế có tên và số lượng.
-- Ví dụ bảng có QC=30, số 10 nằm dưới cột "Lẻ", đơn giá 2.587 và thành tiền 776.100: trả quantity=10, unit="Lẻ", package_quantity=30, package_unit=null, unit_price=2587, price_unit=null, total_price=776100. Không tự đặt package_unit hoặc price_unit thành "Gói" chỉ từ chuỗi mô tả sản phẩm hay phép tính.
-- Nếu số nằm dưới cột "Thùng" thì unit="Thùng". Luôn quan sát đường kẻ và tiêu đề cột theo chiều dọc trước khi đọc đơn vị; không chuyển số sang cột bên cạnh dựa trên phép tính.
-- Trường hợp thông thường không có quy cách, ví dụ 10 Cái × 2.587 = 25.870, giữ unit="Cái", package_quantity/package_unit=null, unit_price=2587 và total_price=25870.
 - Nếu các cột không đủ rõ để biết quan hệ đơn vị, để package_quantity/package_unit/price_unit là null và vẫn giữ total_price đọc được.
+- Trả các trường số dưới dạng JSON number, bỏ ký hiệu tiền tệ và dấu phân cách hàng nghìn theo ngữ cảnh chứng từ. Nếu không phân biệt chắc chắn dấu thập phân với dấu hàng nghìn thì trả null, không đoán.
 
 Chỉ lấy những thông tin thực sự xuất hiện hoặc có thể xác định chắc chắn từ hóa đơn.
 
@@ -155,6 +158,7 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 1. Bên bán và chứng từ
 - supplier là BÊN BÁN, không lấy thông tin người mua/cửa hàng trong ngữ cảnh hệ thống. Giữ nguyên tên, điện thoại, địa chỉ, MST đọc được.
 - invoice.number và invoice.date chỉ lấy khi có; ngày chắc chắn thì YYYY-MM-DD.
+- Nhiều ảnh là các trang theo thứ tự của cùng một hóa đơn. Không lặp dòng cắt qua hai trang; bỏ tiêu đề bảng, số chuyển tiếp và tổng mang sang.
 
 2. Chọn dòng hàng trước khi đọc field
 - Danh mục in sẵn chỉ có tên/mã/đơn vị/đơn giá nhưng không có số lượng hay bằng chứng giao dịch: bỏ hoàn toàn.
@@ -164,11 +168,12 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 - Hàng mua thường: PRODUCT. Hàng tặng có tên và số lượng: PROMOTION_ITEM. Chương trình, chiết khấu hay điều chỉnh không phải hàng tồn kho: đưa vào promotions, không tạo item.
 
 3. Giữ nguyên quan hệ số lượng–đơn vị–quy cách–giá
-- name, quantity, unit và unit_price giữ đúng cột/nhãn trên chứng từ. Nếu "Số lượng" có cột con "Thùng"/"Lẻ", số nằm dưới cột nào thì unit là tên cột đó; quan sát đường kẻ theo chiều dọc, không lấy đơn vị của giá làm unit.
-- package_quantity/package_unit chỉ ghi hệ số quy cách nhìn thấy rõ. price_unit chỉ ghi khi chứng từ thể hiện rõ đơn giá áp dụng cho đơn vị nào; không rõ thì null.
+- name, quantity, unit và unit_price giữ đúng cột/nhãn trên chứng từ. Nếu vùng số lượng có nhiều cột đơn vị, lần theo đường kẻ/căn chỉnh và lấy unit từ tiêu đề của chính ô có số; không dùng tiêu đề cột bên cạnh hay đơn vị giá.
+- Tự nhận diện quy cách từ nhãn, tiêu đề, cột và cấu trúc bảng. Chỉ ghi package_quantity khi có hệ số đóng gói/quy đổi rõ và chỉ ghi package_unit khi đơn vị con đi kèm được thể hiện rõ; không có/không chắc thì null.
+- Không tạo quy cách chỉ từ tên sản phẩm, kiến thức sản phẩm, phép tính thành tiền hoặc một con số đứng riêng. price_unit chỉ ghi khi cấu trúc chứng từ thể hiện rõ đơn giá áp dụng cho đơn vị nào.
 - total_price ưu tiên số thành tiền in/viết trên dòng, không ép thành quantity × unit_price. Thành tiền có thể là quantity × package_quantity × unit_price nếu bố cục chứng từ thể hiện quan hệ đó.
-- Ví dụ: QC=30, số 10 ở cột "Lẻ", unit_price=2587 và total_price=776100 thì trả quantity=10, unit="Lẻ", package_quantity=30, package_unit=null, price_unit=null. Không tự thêm "Gói" từ tên sản phẩm hoặc phép tính. Nếu số ở cột "Thùng" thì unit="Thùng". Trường hợp thường 10 Cái × 2587 = 25870 và không có quy cách thì package_quantity/package_unit=null.
 - Không suy ra field còn thiếu bằng cách tính ngược. Không lấy dữ liệu của tờ khác lọt vào ảnh.
+- Trường số là JSON number sau khi bỏ ký hiệu tiền và dấu phân cách hàng nghìn theo ngữ cảnh; dấu số mơ hồ thì null.
 
 4. Tổng và điều chỉnh
 - total_amount lấy tổng còn hiệu lực được ghi trên hóa đơn; tổng cũ bị gạch thì dùng tổng thay thế rõ. Không có/không chắc thì null, không tự tính bù.

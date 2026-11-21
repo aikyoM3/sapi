@@ -29,6 +29,12 @@ global.fetch = async (url, init) => {
 async function main() {
   process.env.GEMINI_PROMPT_VERSION = 'compact';
   process.env.GEMINI_PROMPT_FALLBACK_ON_INVALID = 'true';
+  for (const prompt of [compactInvoiceExtractionPrompt, detailedInvoiceExtractionPrompt]) {
+    assert.match(prompt, /Tự nhận diện quy cách/);
+    assert.match(prompt, /nhãn, tiêu đề, cột và cấu trúc bảng/);
+    assert.doesNotMatch(prompt, /\b(?:Thùng|Lẻ|Gói)\b|QC\s*=\s*\d|776100|2587/,
+      'Prompt OCR không được hard-code đơn vị hoặc số liệu của một hóa đơn cụ thể.');
+  }
   for (let index = 1; index <= 5; index += 1) {
     delete process.env[`GEMINI_API_KEY_${index}`];
     delete process.env[`GEMINI_BASE_URL_${index}`];
