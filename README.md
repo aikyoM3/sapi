@@ -123,7 +123,7 @@ Với chứng từ viết tay hoặc kết hợp in/viết tay, model trả dữ
 
 - Gemini only reads the text printed on the invoice. It never chooses a KiotViet product or supplier.
 - SAPI only auto-fills a product/supplier when an exact mapping confirmed by the user exists for that supplier and printed name.
-- If no mapping exists, choose a product and supplier from the synchronized KiotViet catalog. On confirmation, SAPI saves the exact mapping for later invoices.
+- If no mapping exists, choose a product and supplier from the synchronized KiotViet catalog. On confirmation, SAPI saves the exact mapping for later invoices. Lookup tries the exact mapping first, then tolerates small OCR text errors only within the same supplier and compatible invoice unit; conflicting numbers/measurement units or ambiguous candidates are never auto-selected.
 - Product and supplier master data are read-only in SAPI. Create or correct them in KiotViet, then use **Đồng bộ ngay**.
 - Before sending images to Gemini, the upload page can remove a saved page and move pages up/down. These operations are locked once Gemini processing starts.
 

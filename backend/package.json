@@ -13,6 +13,7 @@
     "test:invoice-tax": "node scripts/test-invoice-tax.js",
     "test:invoice-sanity": "node scripts/test-invoice-sanity.js",
     "test:invoice-ocr-queue": "node scripts/test-invoice-ocr-queue.js",
+    "test:fuzzy-mapping": "node scripts/test-fuzzy-mapping.js",
     "test:deletion": "node scripts/test-delete-flows.js",
     "experiment:gemini": "node scripts/gemini-experiment.js",
     "test:gemini-experiment": "node scripts/test-gemini-experiment.js",

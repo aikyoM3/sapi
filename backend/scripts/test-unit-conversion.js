@@ -16,6 +16,7 @@ function poolWithMapping(conversionRate) {
       if (sql.includes('FROM productmapping pm')) return { rows: [{
         product_id: 20,
         product_name: 'Nước ngọt X',
+        provider_product_name: 'Nước ngọt X',
         primary_unit: 'Chai',
         provider_unit: 'Thùng',
         local_unit: 'Chai',
