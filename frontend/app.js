@@ -42,10 +42,18 @@ window.SapiUI = (() => {
       if (!AudioContext) return false;
       audioContext ||= new AudioContext();
       const play = () => {
-        const now = audioContext.currentTime; const gain = audioContext.createGain(); gain.connect(audioContext.destination);
-        gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.16, now + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
-        const frequencies = type === 'danger' ? [440, 330] : [660, 880];
-        frequencies.forEach((frequency, index) => { const oscillator = audioContext.createOscillator(); oscillator.type = 'sine'; oscillator.frequency.value = frequency; oscillator.connect(gain); oscillator.start(now + index * 0.16); oscillator.stop(now + index * 0.16 + 0.25); });
+        const now = audioContext.currentTime;
+        const tone = (frequency, start, volume, duration, oscillatorType = 'sine') => {
+          const oscillator = audioContext.createOscillator(); const gain = audioContext.createGain(); oscillator.type = oscillatorType; oscillator.frequency.value = frequency; oscillator.connect(gain); gain.connect(audioContext.destination);
+          gain.gain.setValueAtTime(0.0001, start); gain.gain.exponentialRampToValueAtTime(volume, start + 0.012); gain.gain.exponentialRampToValueAtTime(0.0001, start + duration); oscillator.start(start); oscillator.stop(start + duration + 0.02);
+        };
+        if (type === 'danger') {
+          tone(392, now, 0.28, 0.42, 'triangle'); tone(294, now + 0.2, 0.28, 0.5, 'triangle');
+        } else {
+          // Bell-like fundamental plus a quieter harmonic, followed by a bright second strike.
+          tone(880, now, 0.38, 1.05); tone(1760, now, 0.11, 0.72);
+          tone(1174.66, now + 0.2, 0.4, 1.25); tone(2349.32, now + 0.2, 0.1, 0.8);
+        }
       };
       if (audioContext.state === 'suspended') audioContext.resume().then(play).catch(() => {}); else play();
       return true;
