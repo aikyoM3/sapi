@@ -72,6 +72,15 @@ Danh sách ảnh phải đúng 17 Giấy in, 2 Điền khung, 6 Viết tay và 1
 
 ## Chủ động chạy lượt thật
 
+Với bộ ảnh phẳng trong `backend/test_images/data chính thức`, dùng tùy chọn `--dataset official` và một tên lượt riêng. Script lấy toàn bộ ảnh hỗ trợ trong đúng thư mục này, đặt mã `CT-<tên file>`, vẫn dùng nguyên pipeline, manifest, resume, JSON, CSV và PDF:
+
+```powershell
+npm.cmd run experiment:gemini -- plan --dataset official --user-id 37 --name official-20261122
+npm.cmd run experiment:gemini -- run --dataset official --user-id 37 --name official-20261122
+```
+
+Không trộn lượt official với manifest bộ 26 ảnh cũ.
+
 Lệnh sau mới gửi ảnh tới Gemini và có thể phát sinh chi phí:
 
 ```powershell

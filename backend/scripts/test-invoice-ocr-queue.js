@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { failureDetails, nextAttemptPlan } = require('../services/invoiceOcrQueue');
+const { failureDetails, nextAttemptPlan, deadlineCooldownRoutes, shouldProbeAfterQuota } = require('../services/invoiceOcrQueue');
 
 const blocked = failureDetails(Object.assign(new Error('No available channel for model'), {
   diagnostics: { route_count: 4, attempts: [{ http_status: 404, error: 'model_not_found' }] },
@@ -10,11 +10,20 @@ const rateLimited = failureDetails(Object.assign(new Error('Rate limit exceeded'
   diagnostics: { route_count: 4, attempts: [{ http_status: 429, error: 'rate_limit_exceeded' }] },
 }));
 assert.equal(rateLimited.blockRouteForBatch, true);
+assert.equal(rateLimited.quotaExceeded, true);
+assert.equal(shouldProbeAfterQuota(rateLimited, 0), false);
+assert.equal(shouldProbeAfterQuota(rateLimited, 1), false);
+assert.equal(shouldProbeAfterQuota(rateLimited, 2), true);
+assert.equal(shouldProbeAfterQuota(rateLimited, 3), true);
 
 const timeout = failureDetails(Object.assign(new Error('Request timed out'), {
   diagnostics: { route_count: 4, attempts: [{ http_status: 504, error: 'deadline exceeded' }] },
 }));
 assert.equal(timeout.blockRouteForBatch, false);
+assert.equal(timeout.deadlineExceeded, true);
+assert.deepEqual(deadlineCooldownRoutes(timeout, 0), [0, 1]);
+assert.deepEqual(deadlineCooldownRoutes(timeout, 1), [0, 1]);
+assert.deepEqual(deadlineCooldownRoutes(timeout, 2), []);
 assert.equal(nextAttemptPlan({ route_index: 3, prompt_version: 'detailed', queue_attempts: 4 }, timeout, 4, 8).shouldRetry, false);
 
 const invalid = failureDetails(Object.assign(new Error('Gemini trả về JSON không hợp lệ'), {

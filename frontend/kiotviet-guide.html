@@ -13,7 +13,9 @@
       .step-card { border: 0; box-shadow: 0 1px 3px rgba(24, 36, 51, .08); }
       .step-number { display: inline-flex; flex: 0 0 2.75rem; width: 2.75rem; height: 2.75rem; align-items: center; justify-content: center; border-radius: 50%; background: #206bc4; color: #fff; font-size: 1.1rem; font-weight: 700; }
       .security-box { padding: 1.25rem; border-left: 4px solid #206bc4; border-radius: .5rem; background: #e8f5ff; }
-      .image-placeholder { display: flex; min-height: 180px; margin-top: 1.25rem; align-items: center; justify-content: center; padding: 1rem; border: 1px dashed #b8c4d2; border-radius: .75rem; background: #f8fafc; color: #667085; text-align: center; }
+      .guide-figure { margin: 1.25rem 0 0; }
+      .guide-image { display: block; width: 100%; height: auto; border: 1px solid #dce3eb; border-radius: .75rem; background: #fff; box-shadow: 0 1px 3px rgba(24, 36, 51, .08); }
+      .guide-caption { margin-top: .75rem; color: #667085; font-size: .875rem; text-align: center; }
       .guide-list li { margin-bottom: .5rem; }
       @media (max-width: 575.98px) { .guide-hero { padding: 2.5rem 0; } .card-body { padding: 1.25rem !important; } .step-number { flex-basis: 2.4rem; width: 2.4rem; height: 2.4rem; } }
     </style>
@@ -51,7 +53,10 @@
           <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">1</span><h2 class="h2 mb-0">Truy cập phần Thiết lập cửa hàng</h2></div>
           <p>Đăng nhập vào KiotViet bằng tài khoản quản trị. Từ màn hình quản lý, chọn:</p>
           <p class="fw-bold mb-0">Thiết lập → Cửa hàng</p>
-          <div class="image-placeholder">Vị trí ảnh minh họa bước 1: Thiết lập cửa hàng KiotViet</div>
+          <figure class="guide-figure">
+            <img class="guide-image" src="./assets/kiotviet-guide/step-1-settings-store.png" alt="Vị trí biểu tượng Thiết lập và mục Cửa hàng được khoanh đỏ trên KiotViet" loading="lazy" />
+            <figcaption class="guide-caption">Chọn biểu tượng Thiết lập, sau đó mở mục Cửa hàng.</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -59,22 +64,26 @@
         <div class="card-body p-4">
           <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">2</span><h2 class="h2 mb-0">Mở mục Kết nối API</h2></div>
           <p>Trong menu bên trái, chọn:</p>
-          <p class="fw-bold mb-0">Kết nối API → Chỉnh sửa</p>
-          <div class="image-placeholder">Vị trí ảnh minh họa bước 2: Màn hình Kết nối API KiotViet</div>
+          <p class="fw-bold mb-0">Kết nối API</p>
+          <figure class="guide-figure">
+            <img class="guide-image" src="./assets/kiotviet-guide/step-2-api-menu.png" alt="Mục Kết nối API trong menu Thiết lập KiotViet được khoanh đỏ" loading="lazy" />
+            <figcaption class="guide-caption">Mở mục Kết nối API trong menu bên trái.</figcaption>
+          </figure>
         </div>
       </section>
 
       <section class="card step-card mb-4">
         <div class="card-body p-4">
           <div class="d-flex align-items-center gap-3 mb-3"><span class="step-number">3</span><h2 class="h2 mb-0">Tạo thông tin API</h2></div>
-          <p>KiotViet có thể yêu cầu xác thực trước khi tạo thông tin kết nối. Hãy thực hiện theo hướng dẫn trên màn hình:</p>
+          <p>Ở màn hình Thông tin kết nối API, nhấn <strong>Chỉnh sửa</strong>. KiotViet có thể yêu cầu xác thực trước khi cho phép tạo hoặc thay đổi thông tin kết nối.</p>
           <ul class="guide-list">
             <li>Nhận và nhập mã xác thực.</li>
             <li>Xác nhận điều khoản sử dụng API.</li>
-            <li>Tạo Mã bảo mật.</li>
-            <li>Lưu thông tin kết nối.</li>
           </ul>
-          <div class="image-placeholder">Vị trí ảnh minh họa bước 3: Tạo Mã bảo mật KiotViet</div>
+          <figure class="guide-figure">
+            <img class="guide-image" src="./assets/kiotviet-guide/step-3-edit-api.png" alt="Nút Chỉnh sửa trên màn hình Kết nối API KiotViet được khoanh đỏ" loading="lazy" />
+            <figcaption class="guide-caption">Nhấn Chỉnh sửa để mở biểu mẫu thông tin kết nối.</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -86,7 +95,16 @@
             <div class="col-md-6"><div class="card bg-light h-100"><div class="card-body"><h3 class="h3">Client ID</h3><p class="mb-0">Định danh ứng dụng kết nối.</p></div></div></div>
             <div class="col-md-6"><div class="card bg-light h-100"><div class="card-body"><h3 class="h3">Mã bảo mật</h3><p class="mb-0">Thông tin bí mật được sử dụng để xác thực kết nối.</p></div></div></div>
           </div>
-          <div class="image-placeholder">Vị trí ảnh minh họa bước 4: Client ID và Mã bảo mật KiotViet</div>
+          <ol class="guide-list mt-3">
+            <li>Giữ trạng thái <strong>Đang hoạt động</strong>.</li>
+            <li>Bật quyền cho phép bên thứ ba truy xuất dữ liệu cần thiết.</li>
+            <li>Sao chép <strong>Client ID</strong>; chọn <strong>Tạo mã</strong> nếu cần tạo Mã bảo mật mới, rồi sao chép mã.</li>
+            <li>Nhấn <strong>Lưu</strong>. Không gửi hai giá trị này qua tin nhắn hoặc đưa vào ảnh chụp công khai.</li>
+          </ol>
+          <figure class="guide-figure">
+            <img class="guide-image" src="./assets/kiotviet-guide/step-4-copy-credentials.png" alt="Các trường Client ID, Mã bảo mật, quyền truy xuất và nút Lưu được khoanh đỏ; dữ liệu bí mật đã được che" loading="lazy" />
+            <figcaption class="guide-caption">Các vùng cần thao tác được khoanh đỏ; thông tin trong ảnh minh họa đã được che để bảo mật.</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -99,7 +117,7 @@
             <li>Chọn <strong>Sửa thông tin</strong>, sau đó tìm phần <strong>KiotViet</strong>.</li>
             <li>Nhập Client ID và Mã bảo mật.</li>
             <li>Nhập tên gian hàng, ví dụ <code>abc</code> hoặc <code>abc.kiotviet.vn</code>.</li>
-            <li>Nhấn <strong>Liên kết</strong>.</li>
+            <li>Nhấn <strong>Kết nối / Cập nhật</strong>.</li>
           </ol>
           <p class="text-secondary mb-0">Sau khi xác thực thành công, SAPI sẽ hỏi bạn có muốn đồng bộ dữ liệu KiotViet ngay hay không.</p>
         </div>

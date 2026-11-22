@@ -23,6 +23,10 @@ const invoiceSchema = {
       enum: ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'],
       description: 'Overall quantity/unit table layout visible in the document.',
     },
+    money_scale: {
+      type: ['number', 'null'], enum: [1, 1000, null],
+      description: 'Multiplier for abbreviated bare monetary figures. Use 1000 with an explicit thousand-VND marker, or for handwritten/form-filled documents only when plausible product price after scaling is supported by at least one independent document-wide notation or arithmetic signal; null when uncertain.',
+    },
     supplier: {
       type: 'object',
       additionalProperties: false,
@@ -68,22 +72,25 @@ const invoiceSchema = {
           unit: { type: ['string', 'null'], description: 'Unit from the label/header aligned with the exact quantity cell; never substitute an adjacent column or price unit.' },
           package_quantity: { type: ['number', 'null'], description: 'Explicit packaging/conversion factor recognized from document labels and layout; null when absent or uncertain.' },
           package_unit: { type: ['string', 'null'], description: 'Explicit child/package unit associated with the packaging factor; null when absent or uncertain.' },
-          unit_price: { type: ['number', 'null'], description: 'Price printed for the line; do not convert it to force quantity multiplied by price.' },
+          unit_price: { type: ['number', 'null'], description: 'Visible price normalized to VND when monetary scale is certain; do not convert merely to force arithmetic.' },
+          raw_unit_price: { type: ['string', 'null'], description: 'Exact visible price text before monetary normalization.' },
           price_unit: { type: ['string', 'null'], description: 'Unit to which unit_price explicitly applies; null when not shown clearly.' },
-          total_price: { type: ['number', 'null'], description: 'Printed line total. It may include an explicit package factor; preserve it instead of recalculating.' },
+          total_price: { type: ['number', 'null'], description: 'Visible line total normalized to VND when monetary scale is certain. Preserve it instead of recalculating.' },
+          raw_total_price: { type: ['string', 'null'], description: 'Exact visible line-total text before monetary normalization.' },
           line_type: { type: 'string', enum: ['PRODUCT', 'PROMOTION_ITEM'] },
           line_status: { type: 'string', enum: ['ACTIVE', 'CANCELLED', 'UNCERTAIN'] },
           status_reason: { type: ['string', 'null'] },
         },
-        required: ['name', 'raw_unit_column', 'quantity_cells', 'quantity', 'unit', 'package_quantity', 'package_unit', 'unit_price', 'price_unit', 'total_price', 'line_type', 'line_status', 'status_reason'],
+        required: ['name', 'raw_unit_column', 'quantity_cells', 'quantity', 'unit', 'package_quantity', 'package_unit', 'unit_price', 'raw_unit_price', 'price_unit', 'total_price', 'raw_total_price', 'line_type', 'line_status', 'status_reason'],
       },
     },
     promotions: { type: 'array', items: { type: 'object', additionalProperties: false,
       properties: { description: { type: ['string', 'null'] }, amount: { type: ['number', 'null'] } },
       required: ['description', 'amount'] } },
     total_amount: { type: ['number', 'null'] },
+    raw_total_amount: { type: ['string', 'null'], description: 'Exact visible invoice-total text before monetary normalization.' },
   },
-  required: ['document_type', 'legibility', 'layout_type', 'supplier', 'invoice', 'items', 'promotions', 'total_amount'],
+  required: ['document_type', 'legibility', 'layout_type', 'money_scale', 'supplier', 'invoice', 'items', 'promotions', 'total_amount', 'raw_total_amount'],
 };
 
 class GeminiInvoiceError extends Error {
@@ -229,6 +236,7 @@ function validateInvoice(payload) {
     document_type: DOCUMENT_TYPES.includes(payload.document_type) ? payload.document_type : 'UNKNOWN',
     legibility: LEGIBILITY_LEVELS.includes(payload.legibility) ? payload.legibility : 'PARTIAL',
     layout_type: LAYOUT_TYPES.includes(payload.layout_type) ? payload.layout_type : 'UNKNOWN',
+    money_scale: [1, 1000].includes(payload.money_scale) ? payload.money_scale : null,
     supplier: {
       name: nullableString(payload.supplier.name, 'supplier.name'),
       phone: nullableString(payload.supplier.phone, 'supplier.phone'),
@@ -255,8 +263,10 @@ function validateInvoice(payload) {
         package_quantity: nullableNumber(item.package_quantity, `items[${index}].package_quantity`),
         package_unit: nullableString(item.package_unit, `items[${index}].package_unit`),
         unit_price: nullableNumber(item.unit_price, `items[${index}].unit_price`),
+        raw_unit_price: nullableString(item.raw_unit_price ?? null, `items[${index}].raw_unit_price`),
         price_unit: nullableString(item.price_unit, `items[${index}].price_unit`),
         total_price: nullableNumber(item.total_price, `items[${index}].total_price`),
+        raw_total_price: nullableString(item.raw_total_price ?? null, `items[${index}].raw_total_price`),
         line_type: ['PRODUCT', 'PROMOTION_ITEM'].includes(item.line_type) ? item.line_type : 'PRODUCT',
         line_status: ['ACTIVE', 'CANCELLED', 'UNCERTAIN'].includes(item.line_status) ? item.line_status : 'UNCERTAIN',
         status_reason: nullableString(item.status_reason, `items[${index}].status_reason`),
@@ -267,6 +277,7 @@ function validateInvoice(payload) {
       amount: nullableNumber(promotion.amount, `promotions[${index}].amount`),
     })),
     total_amount: nullableNumber(payload.total_amount, 'total_amount'),
+    raw_total_amount: nullableString(payload.raw_total_amount ?? null, 'raw_total_amount'),
   };
 }
 
@@ -374,4 +385,20 @@ async function extractInvoiceFromImage(file, options = {}) {
   return extractInvoiceFromImages([file], options);
 }
 
-module.exports = { extractInvoiceFromImage, extractInvoiceFromImages, extractInvoiceFromImagesDetailed, getExtractionSettings, GeminiInvoiceError, invoiceSchema, buildBuyerContext, removeBuyerFromSupplier };
+async function probeGeminiRoute(connection, routeIndex) {
+  const configured = config(connection?.apiKey, connection);
+  const routes = configured.providers.flatMap((provider) => [...new Set([
+    configured.model, configured.fallbackModel,
+  ].filter(Boolean))].map((model) => ({ provider, model })));
+  const route = routes[Number(routeIndex)];
+  if (!route) throw new GeminiInvoiceError('Tuyến kiểm tra không còn tồn tại trong cấu hình hiện tại.', 503);
+  const ai = createGeminiClient(route.provider.apiKey, { baseUrl: route.provider.baseUrl, timeoutMs: 15000 });
+  await ai.models.generateContent({
+    model: route.model,
+    contents: 'Reply with OK.',
+    config: { maxOutputTokens: 5, temperature: 0, httpOptions: { timeout: 15000 } },
+  });
+  return { routeCount: routes.length, model: route.model };
+}
+
+module.exports = { extractInvoiceFromImage, extractInvoiceFromImages, extractInvoiceFromImagesDetailed, probeGeminiRoute, getExtractionSettings, GeminiInvoiceError, invoiceSchema, buildBuyerContext, removeBuyerFromSupplier };

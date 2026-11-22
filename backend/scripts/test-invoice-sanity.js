@@ -32,4 +32,56 @@ mixed.items[0].quantity_cells = [{ sub_header: 'Thùng', value: 2 }, { sub_heade
 const mixedResult = inspectInvoice(mixed);
 assert(mixedResult.issues.some((issue) => issue.code === 'MULTIPLE_QUANTITY_CELLS'));
 
-console.log('PASS: invoice sanity detects split-column units, package totals, disagreements and ambiguous mixed quantities.');
+const thousandInvoice = {
+  document_type: 'HANDWRITTEN', layout_type: 'FREE_FORM', money_scale: 1000,
+  total_amount: 24, raw_total_amount: '24',
+  items: [{ name: 'Bánh', quantity: 2, unit: 'Cái', quantity_cells: [], package_quantity: null,
+    unit_price: 12, raw_unit_price: '12', total_price: 24, raw_total_price: '24' }],
+};
+const thousandResult = inspectInvoice(thousandInvoice);
+assert.equal(thousandResult.invoice.items[0].unit_price, 12000);
+assert.equal(thousandResult.invoice.items[0].total_price, 24000);
+assert.equal(thousandResult.invoice.total_amount, 24000);
+assert(thousandResult.issues.some((issue) => issue.code === 'THOUSAND_VND_NORMALIZED'));
+
+const alreadyNormalized = structuredClone(thousandInvoice);
+alreadyNormalized.items[0].unit_price = 12000;
+alreadyNormalized.items[0].total_price = 24000;
+alreadyNormalized.total_amount = 24000;
+const preserved = inspectInvoice(alreadyNormalized);
+assert.equal(preserved.invoice.items[0].unit_price, 12000);
+assert.equal(preserved.invoice.items[0].total_price, 24000);
+
+const explicitSuffix = structuredClone(thousandInvoice);
+explicitSuffix.items[0].unit_price = 12000;
+explicitSuffix.items[0].raw_unit_price = '12k';
+const suffixResult = inspectInvoice(explicitSuffix);
+assert.equal(suffixResult.invoice.items[0].unit_price, 12000);
+
+const formattedRaw = structuredClone(thousandInvoice);
+formattedRaw.items[0].unit_price = 12;
+formattedRaw.items[0].raw_unit_price = '12.000đ';
+const formattedResult = inspectInvoice(formattedRaw);
+assert.equal(formattedResult.invoice.items[0].unit_price, 12000);
+
+const unknownScale = structuredClone(thousandInvoice);
+unknownScale.money_scale = null;
+const uncertain = inspectInvoice(unknownScale);
+assert.equal(uncertain.invoice.items[0].unit_price, 12);
+assert.equal(uncertain.invoice.items[0].total_price, 24);
+
+const arithmeticEvidence = structuredClone(thousandInvoice);
+arithmeticEvidence.money_scale = null;
+arithmeticEvidence.items[0].total_price = 24000;
+arithmeticEvidence.items[0].raw_total_price = '24.000';
+const arithmeticResult = inspectInvoice(arithmeticEvidence);
+assert.equal(arithmeticResult.invoice.items[0].unit_price, 12000);
+assert.equal(arithmeticResult.invoice.items[0].total_price, 24000);
+
+const inferredInvoiceTotal = structuredClone(arithmeticEvidence);
+inferredInvoiceTotal.total_amount = 24;
+inferredInvoiceTotal.raw_total_amount = null;
+const inferredTotalResult = inspectInvoice(inferredInvoiceTotal);
+assert.equal(inferredTotalResult.invoice.total_amount, 24000);
+
+console.log('PASS: invoice sanity handles units, package totals, disagreements and guarded thousand-VND normalization.');

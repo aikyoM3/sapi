@@ -10,6 +10,7 @@ Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và tr�
   "document_type": "PRINTED" | "HANDWRITTEN" | "MIXED" | "UNKNOWN",
   "legibility": "CLEAR" | "PARTIAL" | "UNREADABLE",
   "layout_type": "SINGLE_UNIT_COLUMN" | "SPLIT_QUANTITY_COLUMNS" | "FREE_FORM" | "UNKNOWN",
+  "money_scale": 1 | 1000 | null,
   "supplier": {
     "name": string | null,
     "phone": string | null,
@@ -32,8 +33,10 @@ Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và tr�
       "package_quantity": number | null,
       "package_unit": string | null,
       "unit_price": number | null,
+      "raw_unit_price": string | null,
       "price_unit": string | null,
       "total_price": number | null,
+      "raw_total_price": string | null,
       "line_type": "PRODUCT" | "PROMOTION_ITEM",
       "line_status": "ACTIVE" | "CANCELLED" | "UNCERTAIN",
       "status_reason": string | null
@@ -42,7 +45,8 @@ Hãy đọc chính xác nội dung xuất hiện trên ảnh hóa đơn và tr�
   "promotions": [
     { "description": string | null, "amount": number | null }
   ],
-  "total_amount": number | null
+  "total_amount": number | null,
+  "raw_total_amount": string | null
 }
 
 QUY TẮC:
@@ -116,9 +120,12 @@ Sau khi phân loại các dòng giao dịch, tạo một object cho mỗi mục,
 - Tự nhận diện quy cách từ nhãn, tiêu đề, cột và cấu trúc bảng. Chỉ đặt package_quantity khi chứng từ thể hiện rõ một hệ số đóng gói/quy đổi; chỉ đặt package_unit khi đơn vị con đi kèm hệ số được thể hiện rõ.
 - Con số hoặc đơn vị xuất hiện trong tên/mô tả sản phẩm không đủ để tự tạo quy cách nếu không có bằng chứng bố cục hỗ trợ. Kiến thức sản phẩm và phép tính thành tiền không phải bằng chứng duy nhất.
 - Nếu chứng từ không có quy cách rõ ràng hoặc quan hệ giữa các ô chưa chắc chắn, package_quantity và package_unit phải là null.
-- unit_price: giữ nguyên đơn giá in/viết trên hóa đơn.
+- unit_price: giữ đúng giá trị kinh tế của đơn giá in/viết trên hóa đơn và chuẩn hóa sang VND khi đơn vị tiền được xác định chắc chắn; không tính ngược để ép khớp.
+- raw_unit_price và raw_total_price: giữ đúng chuỗi số tiền nhìn thấy trước khi chuẩn hóa, gồm dấu phân cách hoặc hậu tố như k/nghìn nếu có.
 - price_unit: đơn vị mà unit_price áp dụng, chỉ ghi khi nhãn/cấu trúc chứng từ thể hiện rõ; không mặc định trùng với unit hay package_unit.
 - total_price: ưu tiên giữ nguyên thành tiền được in/viết trên dòng. Không thay bằng quantity × unit_price khi đơn giá áp dụng theo đơn vị con.
+- Các field số tiền unit_price, total_price và total_amount phải là giá trị VND sau chuẩn hóa. money_scale=1000 khi chứng từ ghi rõ đơn vị nghìn đồng (nghìn/ngàn, k, 000đ). Với HANDWRITTEN/MIXED hoặc phiếu mẫu điền khung có giá trị giao dịch viết tay nhưng không ghi đơn vị tiền, chỉ được suy luận money_scale=1000 khi dấu hiệu về loại hàng là bắt buộc: cách hiểu các số đó là số VND nguyên gốc phải rõ ràng phi thực tế trong khi nhân 1.000 tạo mức giá hợp lý; đồng thời phải có thêm ít nhất một bằng chứng độc lập là (a) nhiều đơn giá/thành tiền/tổng cùng dùng cách viết tắt nhất quán, hoặc (b) phép tính số lượng × đơn giá = thành tiền khớp trên nhiều dòng hay khớp tổng phiếu. Không dùng riêng kiến thức giá mặt hàng hoặc riêng việc số tiền nhỏ làm căn cứ. Chỉ có một dòng, tên hàng không chắc, các dấu hiệu mâu thuẫn hoặc cả hai cách hiểu đều có thể hợp lý thì money_scale=null. money_scale=1 khi số đã ghi theo đồng.
+- Ví dụ tổng quát: nếu số tiền nhìn thấy là “12”, chứng từ dùng đơn vị nghìn đồng và phép tính dòng xác nhận, raw_unit_price="12", money_scale=1000, unit_price=12000. Không áp dụng quy tắc này cho số lượng, quy cách, mã hàng hoặc số hóa đơn.
 - line_type: PRODUCT với hàng mua thông thường; PROMOTION_ITEM với hàng tặng thực tế có tên và số lượng.
 - Nếu các cột không đủ rõ để biết quan hệ đơn vị, để package_quantity/package_unit/price_unit là null và vẫn giữ total_price đọc được.
 - Trả các trường số dưới dạng JSON number, bỏ ký hiệu tiền tệ và dấu phân cách hàng nghìn theo ngữ cảnh chứng từ. Nếu không phân biệt chắc chắn dấu thập phân với dấu hàng nghìn thì trả null, không đoán.
@@ -130,6 +137,7 @@ Chỉ lấy những thông tin thực sự xuất hiện hoặc có thể xác �
 - Nếu tổng cũ bị gạch sửa và có tổng thay thế rõ ràng, chỉ lấy tổng còn hiệu lực; không cộng cả tổng cũ và tổng mới.
 - Không tự tính lại nếu hóa đơn đã có tổng tiền rõ ràng.
 - Nếu không có hoặc không xác định được thì null.
+- raw_total_amount giữ đúng chuỗi tổng tiền nhìn thấy trước khi chuẩn hóa.
 
 5. KHUYẾN MẠI VÀ ĐIỀU CHỈNH:
 - Chương trình/điều chỉnh không phải hàng tồn kho đưa vào promotions, không tạo thành sản phẩm nhập kho.
@@ -197,6 +205,7 @@ const compactInvoiceExtractionPrompt = `Đọc các ảnh theo thứ tự như c
 - total_price ưu tiên số thành tiền in/viết trên dòng, không ép thành quantity × unit_price. Thành tiền có thể là quantity × package_quantity × unit_price nếu bố cục chứng từ thể hiện quan hệ đó.
 - Không suy ra field còn thiếu bằng cách tính ngược. Không lấy dữ liệu của tờ khác lọt vào ảnh.
 - Trường số là JSON number sau khi bỏ ký hiệu tiền và dấu phân cách hàng nghìn theo ngữ cảnh; dấu số mơ hồ thì null.
+- raw_unit_price/raw_total_price/raw_total_amount giữ chuỗi tiền nhìn thấy. unit_price/total_price/total_amount trả theo VND. money_scale=1000 khi có nhãn nghìn/ngàn/k/000đ. Với HANDWRITTEN/MIXED hoặc phiếu điền khung có số tiền viết tay không ghi đơn vị, loại hàng phải khiến cách hiểu theo VND nguyên gốc rõ ràng phi thực tế còn ×1.000 hợp lý, và phải có thêm ít nhất một bằng chứng độc lập: nhiều giá/tổng viết tắt nhất quán hoặc phép tính khớp trên nhiều dòng/tổng phiếu. Không dùng riêng giá thị trường hay riêng số nhỏ; chỉ một dòng, hàng đọc không chắc, mâu thuẫn hoặc hai cách hiểu đều hợp lý thì money_scale=null. money_scale=1 khi ghi theo đồng.
 
 4. Tổng và điều chỉnh
 - total_amount lấy tổng còn hiệu lực được ghi trên hóa đơn; tổng cũ bị gạch thì dùng tổng thay thế rõ. Không có/không chắc thì null, không tự tính bù.

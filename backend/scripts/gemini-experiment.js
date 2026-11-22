@@ -7,13 +7,13 @@ const { Pool } = require('pg');
 const { loadGeminiConnection, geminiStatus, developmentConnections } = require('../services/geminiConnectionService');
 const { extractInvoiceFromImagesDetailed } = require('../services/geminiInvoiceService');
 const { withTransportDiagnostics } = require('./experiments/captureGeminiTransport');
-const { backendRoot, discoverDataset, outputDirectory, buildManifest, runExperiment, loadResults, exportCsv, recoverStaleLock } = require('./experiments/geminiExperiment');
+const { backendRoot, discoverDataset, discoverOfficialDataset, outputDirectory, buildManifest, runExperiment, loadResults, exportCsv, recoverStaleLock } = require('./experiments/geminiExperiment');
 
 function options(args) {
   const parsed = {};
   for (let i = 0; i < args.length; i++) {
     if (['--retry-errors', '--stop-on-error', '--no-report'].includes(args[i])) { parsed[args[i].slice(2)] = true; continue; }
-    if (!['--name', '--user-id', '--limit', '--python', '--retry-image'].includes(args[i]) || !args[i+1] || args[i+1].startsWith('--')) throw new Error(`Tham số không hợp lệ: ${args[i]}`);
+    if (!['--name', '--user-id', '--limit', '--python', '--retry-image', '--dataset'].includes(args[i]) || !args[i+1] || args[i+1].startsWith('--')) throw new Error(`Tham số không hợp lệ: ${args[i]}`);
     const name = args[i].slice(2); const value = args[++i];
     if (name === 'retry-image') (parsed[name] ||= []).push(value);
     else parsed[name] = value;
@@ -57,7 +57,8 @@ async function main() {
   if (command === 'users') return listUsers();
   if (command === 'report') return report(outputDirectory(opts.name || 'gemini-26'), opts.python);
   if (!['images','plan','run'].includes(command)) throw new Error('Lệnh không hợp lệ. Dùng help.');
-  const dataset = await discoverDataset();
+  if (opts.dataset && opts.dataset !== 'official') throw new Error('--dataset hiện chỉ hỗ trợ giá trị official.');
+  const dataset = opts.dataset === 'official' ? await discoverOfficialDataset() : await discoverDataset();
   if (command === 'images') { console.table(dataset.images.map(({image_id,group,kind,source_path}) => ({image_id,group,kind,source_path}))); if (dataset.relocation) console.log(dataset.relocation); return; }
   const { account, apiKey, connection } = await readAccount(opts['user-id'], command === 'run');
   const manifest = await buildManifest(dataset, account, false, connection);

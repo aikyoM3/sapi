@@ -42,6 +42,23 @@ async function discoverDataset() {
   if (images.length !== 26 || new Set(images.map((i) => i.image_id)).size !== 26) throw new Error('Cần đúng 26 mã ảnh duy nhất.');
   return { images, relocation, excluded_root_files: ['test_images/13.jpg', 'test_images/21.jpg'] };
 }
+
+async function discoverOfficialDataset() {
+  const folder = path.join(inputRoot, 'data chính thức');
+  const files = await imagesIn(folder);
+  if (!files.length) throw new Error('Không tìm thấy ảnh trong test_images/data chính thức.');
+  const images = [];
+  for (const file of files) {
+    const b = await fs.readFile(file); const code = path.parse(file).name;
+    images.push({
+      image_id: `CT-${code}`, original_code: code, group: 'Dữ liệu chính thức', kind: 'Dữ liệu chính thức',
+      source_path: path.relative(backendRoot, file).split(path.sep).join('/'), mime_type: mimeType(b),
+      image_sha256: sha(b), file_bytes: b.length,
+    });
+  }
+  if (new Set(images.map((image) => image.image_id)).size !== images.length) throw new Error('Mã ảnh trong data chính thức bị trùng.');
+  return { images, relocation: null, excluded_root_files: [] };
+}
 function outputDirectory(name) {
   if (!/^[a-z0-9][a-z0-9._-]{0,100}$/i.test(name)) throw new Error('--name chỉ dùng chữ/số, dấu chấm, gạch ngang hoặc gạch dưới.');
   return path.join(backendRoot, 'experiments', name);
@@ -170,4 +187,4 @@ async function loadResults(out) {
   }
   return { manifest, records };
 }
-module.exports = { backendRoot, discoverDataset, outputDirectory, buildManifest, runExperiment, exportCsv, loadResults, csvHeaders, atomicJson, retryableRecord, recoverStaleLock };
+module.exports = { backendRoot, discoverDataset, discoverOfficialDataset, outputDirectory, buildManifest, runExperiment, exportCsv, loadResults, csvHeaders, atomicJson, retryableRecord, recoverStaleLock };

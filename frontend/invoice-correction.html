@@ -50,7 +50,7 @@
   </dialog>
   <script src="./app.js"></script>
   <script>
-    const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+    const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
     const sessionToken = new URLSearchParams(location.search).get('session');
     const itemsBody = document.querySelector('#items');
     let extraction = null;
@@ -60,6 +60,11 @@
     const draftKey = sessionToken ? `sapi:invoice-draft:${sessionToken}` : null;
     const numberValue = (element) => Math.max(0, Number(element.value) || 0);
     const text = (value) => value === null || value === undefined ? '' : String(value);
+    const wholeMoney = (value) => {
+      if (value === null || value === undefined || value === '') return '';
+      const numeric = Number(value); return Number.isFinite(numeric) ? String(Math.round(numeric)) : '';
+    };
+    const displayMoney = (value) => wholeMoney(value) === '' ? '' : money.format(Number(wholeMoney(value)));
     const normalizedUnit = (value) => text(value).trim().toLocaleLowerCase('vi-VN').replace(/\s+/g, ' ');
     const closeNumber = (left, right) => Math.abs(Number(left) - Number(right)) <= Math.max(0.000001, Math.abs(Number(right)) * 0.000001);
     const extractionFingerprint = () => JSON.stringify((extraction?.gemini?.items || []).map((item) => [item.name, item.quantity, item.unit, item.total_price]));
@@ -115,7 +120,7 @@
         if (text(saved.productId) || text(saved.productName).trim()) {
           product.value = text(saved.productName); product.dataset.productId = text(saved.productId); product.dataset.autoMapped = ''; product.dataset.userEdited = 'true';
         }
-        row.querySelector('.line-quantity').value = text(saved.quantity); row.querySelector('.line-unit').value = text(saved.unit); row.querySelector('.line-price').value = text(saved.unitPrice); row.dataset.conversionRate = text(saved.conversionRate);
+        row.querySelector('.line-quantity').value = text(saved.quantity); row.querySelector('.line-unit').value = text(saved.unit); row.querySelector('.line-price').value = wholeMoney(saved.unitPrice); row.dataset.conversionRate = text(saved.conversionRate);
       });
       const selectedSupplierId = document.querySelector('#supplier-id').value;
       document.querySelector('#supplier-selection-status').textContent = selectedSupplierId
@@ -180,6 +185,11 @@
       input.addEventListener('blur', () => setTimeout(close, 150));
     }
     function createInput(className, value, type = 'text') { const input = document.createElement('input'); input.className = `form-control ${className}`; input.type = type; input.value = text(value); if (type === 'number') { input.min = '0'; input.step = '0.01'; } return input; }
+    function createMoneyInput(className, value) {
+      const input = createInput(className, wholeMoney(value), 'number'); input.step = '1'; input.inputMode = 'numeric';
+      input.addEventListener('change', () => { input.value = wholeMoney(input.value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+      return input;
+    }
     function td(content, className = '') { const cell = document.createElement('td'); cell.className = className; if (content instanceof HTMLElement) cell.append(content); else cell.textContent = text(content); return cell; }
     function addItem(item, mapped, index) {
       const row = document.createElement('tr'); row.className = 'invoice-line'; row.dataset.sourceIndex = text(index); row.dataset.externalName = text(item.name); row.dataset.externalUnit = text(item.unit); row.dataset.externalQuantity = text(item.quantity); row.dataset.externalTotal = text(item.total_price); row.dataset.conversionRate = text(mapped?.conversion_rate);
@@ -192,7 +202,7 @@
       const usedPrice = initialUsedPrice(item, mapped); const normalized = item.total_price != null && item.quantity > 0 && Number(item.unit_price) * Number(item.quantity) !== Number(item.total_price);
       const details = [item.package_quantity && `${item.package_quantity} ${text(item.package_unit)}`.trim(), item.price_unit && `Giá theo ${item.price_unit}`, normalized && 'Đơn giá sử dụng đã quy đổi theo thành tiền', item.line_type === 'PROMOTION_ITEM' && 'Hàng khuyến mại', item.line_status === 'UNCERTAIN' && `Cần kiểm tra: ${text(item.status_reason)}`].filter(Boolean).join(' · ');
       const detailsCell = td(details, showPackagingDetails ? '' : 'd-none');
-      row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), detailsCell, td(item.unit_price, 'text-end'), td(createInput('line-price text-end', usedPrice, 'number')), td(item.total_price, 'text-end'));
+      row.append(td(index + 1, 'text-center'), td(item.name, 'read-name'), td(productWrap), td(item.quantity, 'text-end'), td(createInput('line-quantity text-end', mapped?.quantity ?? item.quantity, 'number')), td(item.unit), td(createInput('line-unit', mapped?.unit ?? item.unit)), detailsCell, td(displayMoney(item.unit_price), 'text-end'), td(createMoneyInput('line-price text-end', usedPrice)), td(displayMoney(item.total_price), 'text-end'));
       const total = document.createElement('strong'); total.className = 'line-total'; row.append(td(total, 'text-end'));
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-sm btn-outline-danger delete-line'; remove.textContent = 'Xóa'; remove.setAttribute('aria-label', `Xóa dòng ${index + 1}: ${text(item.name)}`);
       remove.addEventListener('click', async () => {
@@ -286,9 +296,9 @@
           const index = Number(row.dataset.sourceIndex); const mapped = payload.corresponding?.items?.[index]; const original = extraction.gemini.items?.[index]; const input = row.querySelector('.product-name');
           if (!original || input.dataset.userEdited === 'true') return;
           if (mapped?.product_id) {
-            input.value = text(mapped.name); input.dataset.productId = text(mapped.product_id); input.dataset.autoMapped = 'true'; input.classList.remove('is-invalid'); row.dataset.conversionRate = text(mapped.conversion_rate); row.querySelector('.line-quantity').value = text(mapped.quantity ?? original.quantity); row.querySelector('.line-unit').value = text(mapped.unit ?? original.unit); row.querySelector('.line-price').value = text(initialUsedPrice(original, mapped)); filled += 1;
+            input.value = text(mapped.name); input.dataset.productId = text(mapped.product_id); input.dataset.autoMapped = 'true'; input.classList.remove('is-invalid'); row.dataset.conversionRate = text(mapped.conversion_rate); row.querySelector('.line-quantity').value = text(mapped.quantity ?? original.quantity); row.querySelector('.line-unit').value = text(mapped.unit ?? original.unit); row.querySelector('.line-price').value = wholeMoney(initialUsedPrice(original, mapped)); filled += 1;
           } else if (input.dataset.autoMapped === 'true') {
-            input.value = ''; input.dataset.productId = ''; input.dataset.autoMapped = ''; row.dataset.conversionRate = ''; row.querySelector('.line-quantity').value = text(original.quantity); row.querySelector('.line-unit').value = text(original.unit); row.querySelector('.line-price').value = text(initialUsedPrice(original));
+            input.value = ''; input.dataset.productId = ''; input.dataset.autoMapped = ''; row.dataset.conversionRate = ''; row.querySelector('.line-quantity').value = text(original.quantity); row.querySelector('.line-unit').value = text(original.unit); row.querySelector('.line-price').value = wholeMoney(initialUsedPrice(original));
           }
         });
         status.textContent = `Đã chọn nhà cung cấp. Tự điền ${filled}/${itemsBody.querySelectorAll('.invoice-line').length} dòng từ dữ liệu đối chiếu.`; updateTotals(); scheduleDraftSave();
@@ -342,6 +352,20 @@
     }
     buildSuggestions(document.querySelector('#supplier-name'), document.querySelector('#supplier-suggestions'), '/api/suppliers/search', selectSupplier, { minimumQueryLength: 0, openOnFocus: true });
     document.querySelector('#supplier-name').addEventListener('input', () => { document.querySelector('#supplier-id').value = ''; document.querySelector('#supplier-name').classList.remove('is-invalid'); document.querySelector('#supplier-phone').value = ''; document.querySelector('#supplier-address').value = ''; document.querySelector('#supplier-selection-status').textContent = 'Chưa chọn: hãy chọn một kết quả trong danh sách gợi ý.'; scheduleDraftSave(); });
+    const editableLineFields = ['.product-name', '.line-quantity', '.line-unit', '.line-price'];
+    function verticalFieldTarget(field, offset) {
+      const row = field.closest('.invoice-line'); const rows = [...itemsBody.querySelectorAll('.invoice-line')]; const rowIndex = rows.indexOf(row); const selector = editableLineFields.find((candidate) => field.matches(candidate));
+      return selector && rows[rowIndex + offset] ? rows[rowIndex + offset].querySelector(selector) : null;
+    }
+    itemsBody.addEventListener('keydown', (event) => {
+      const field = event.target.closest(editableLineFields.join(',')); if (!field) return;
+      const suggestionsOpen = field.classList.contains('product-name') && field.closest('.suggestion-wrap')?.querySelector('.suggestions.show');
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && suggestionsOpen) return;
+      if (event.key !== 'Tab' && event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const offset = event.key === 'ArrowUp' || event.key === 'Tab' && event.shiftKey ? -1 : 1; const target = verticalFieldTarget(field, offset); if (!target) return;
+      event.preventDefault(); target.focus(); if (typeof target.select === 'function') target.select();
+    });
+    document.addEventListener('wheel', (event) => { if (event.target.matches('input[type="number"]') && document.activeElement === event.target) event.preventDefault(); }, { passive: false, capture: true });
     itemsBody.addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#discount').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#tax-value').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#tax-mode').addEventListener('change', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#paid-amount').addEventListener('input', () => { updateTotals(); scheduleDraftSave(); }); document.querySelector('#invoice-number').addEventListener('input', scheduleDraftSave); document.querySelector('#invoice-date').addEventListener('change', scheduleDraftSave);
     document.querySelector('#view-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').showModal()); document.querySelector('#close-gemini').addEventListener('click', () => document.querySelector('#gemini-dialog').close());
     window.addEventListener('beforeunload', saveDraft); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveDraft(); });

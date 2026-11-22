@@ -196,6 +196,16 @@ async function syncBranches(pool, lastModifiedFrom, userId, config) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // A full sync is authoritative. Remove branch IDs left by another retailer;
+    // incremental syncs must retain rows that the API did not return.
+    if (!lastModifiedFrom) {
+      const currentIds = branches.map((branch) => Number(branch.id)).filter(Number.isFinite);
+      if (currentIds.length) await client.query(
+        'DELETE FROM kiotvietbranch WHERE user_id=$1 AND NOT (kiotviet_id=ANY($2::bigint[]))',
+        [userId, currentIds],
+      );
+      else await client.query('DELETE FROM kiotvietbranch WHERE user_id=$1', [userId]);
+    }
     for (const branch of branches) await client.query(`
       INSERT INTO kiotvietbranch (user_id, kiotviet_id, branch_name, address, contact_number, kiotviet_modified_at)
       VALUES ($1,$2,$3,$4,$5,$6)

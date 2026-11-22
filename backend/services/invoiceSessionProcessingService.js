@@ -2,7 +2,7 @@ const fs = require('fs/promises');
 const { extractInvoiceFromImagesDetailed } = require('./geminiInvoiceService');
 const { loadGeminiConnection } = require('./geminiConnectionService');
 const { mapExtractedInvoice } = require('./invoiceMappingService');
-const { inspectInvoice, readingsAgree } = require('./invoiceSanityService');
+const { inspectInvoice, readingsAgree, normalizeInvoiceMoney } = require('./invoiceSanityService');
 
 function shouldVerifyInspection(firstInspection, invoice) {
   const handwritten = ['HANDWRITTEN', 'MIXED'].includes(invoice?.document_type);
@@ -49,7 +49,7 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
         sanity.normalization_applied = true;
         sanity.verification = { status: 'CONSISTENT', model: verificationDetails.model_used };
       } else {
-        reviewedInvoice = details.invoice;
+        reviewedInvoice = normalizeInvoiceMoney(details.invoice).invoice;
         sanity.verification = { status: 'DISAGREEMENT', model: verificationDetails.model_used };
         sanity.issues.push({
           code: 'SECOND_READING_DISAGREEMENT',
@@ -58,7 +58,7 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
         });
       }
     } catch (error) {
-      reviewedInvoice = details.invoice;
+      reviewedInvoice = normalizeInvoiceMoney(details.invoice).invoice;
       sanity.verification = { status: 'FAILED' };
       sanity.issues.push({
         code: 'SECOND_READING_FAILED',
@@ -67,7 +67,7 @@ async function processInvoiceSession(pool, session, extractionOptions = {}) {
       });
     }
   } else if (firstInspection.needsVerification) {
-    reviewedInvoice = details.invoice;
+    reviewedInvoice = normalizeInvoiceMoney(details.invoice).invoice;
     if (isHandwritten) sanity.verification = { status: 'SKIPPED_HANDWRITING' };
   }
 

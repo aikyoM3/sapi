@@ -115,6 +115,8 @@ Kiểm tra kết nối thật (gửi một yêu cầu văn bản ngắn, có th�
 
 Với chứng từ viết tay hoặc kết hợp in/viết tay, model trả dữ liệu đọc chắc chắn trong một lượt và để `null` cho phần không rõ. SAPI không chạy lượt kiểm chứng thứ hai cho loại này; người dùng kiểm tra và bổ sung trên trang sửa hóa đơn.
 
+Với phiếu viết tay/điền khung không ghi đơn vị tiền, SAPI chỉ cho phép suy luận các số tiền đang viết theo nghìn đồng khi mức giá theo loại hàng chỉ hợp lý sau khi nhân 1.000 và có thêm ít nhất một dấu hiệu độc lập trên toàn chứng từ: cách viết tắt nhất quán hoặc quan hệ số lượng–đơn giá–thành tiền/tổng khớp trên nhiều dòng. Một dấu hiệu đơn lẻ, một dòng duy nhất hoặc trường hợp vẫn có hai cách hiểu hợp lý phải giữ `money_scale=null`; dữ liệu gốc luôn được giữ để người dùng kiểm tra.
+
 5. The application scopes supplier/product mapping to the logged-in account. Product autocomplete searches product names, codes, and external names with a debounce.
 6. **Sửa hóa đơn** giữ riêng JSON OCR gốc và dữ liệu đã qua kiểm tra để sử dụng. Schema giữ các cột số lượng thô (ví dụ `Thùng`/`Lẻ`); backend kiểm tra quan hệ số lượng–quy cách–đơn giá–thành tiền. Khi phát hiện nghi vấn, hệ thống đọc kiểm chứng lần hai và chỉ áp dụng chuẩn hóa nếu hai lượt nhất quán; nếu khác nhau thì giữ lượt đầu và cảnh báo người dùng. Dòng `CANCELLED` bị loại khỏi nhập hàng; dòng `UNCERTAIN` được tô cảnh báo.
 7. Only **Xác nhận hóa đơn** creates `purchaseinvoice` and `purchaseinvoiceitem`, updates mapping where applicable, marks the session confirmed, and deletes temporary image files.

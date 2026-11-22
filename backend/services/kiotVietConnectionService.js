@@ -38,17 +38,36 @@ async function connectKiotViet(pool, userId, body) {
   credentials.retailer = normalizeRetailer(credentials.retailer);
   const verified = await verifyKiotViet(credentials);
   const encryptedSecret = encryptSecret(credentials.clientSecret);
-  const { rows } = await pool.query(`
-    INSERT INTO kiotviet_connections
-      (user_id, retailer_code, retailer_name, client_id, client_secret_encrypted, status, connected_at, last_verified_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,'CONNECTED',NOW(),NOW(),NOW())
-    ON CONFLICT (user_id) DO UPDATE SET retailer_code=EXCLUDED.retailer_code,
-      retailer_name=EXCLUDED.retailer_name, client_id=EXCLUDED.client_id,
-      client_secret_encrypted=EXCLUDED.client_secret_encrypted, status='CONNECTED',
-      connected_at=NOW(), last_verified_at=NOW(), updated_at=NOW()
-    RETURNING retailer_code, retailer_name, last_sync_at
-  `, [userId, verified.retailerCode, verified.retailerName, credentials.clientId, encryptedSecret]);
-  return rows[0];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(`
+      INSERT INTO kiotviet_connections
+        (user_id, retailer_code, retailer_name, client_id, client_secret_encrypted, status, connected_at, last_verified_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,'CONNECTED',NOW(),NOW(),NOW())
+      ON CONFLICT (user_id) DO UPDATE SET retailer_code=EXCLUDED.retailer_code,
+        retailer_name=EXCLUDED.retailer_name, client_id=EXCLUDED.client_id,
+        client_secret_encrypted=EXCLUDED.client_secret_encrypted, status='CONNECTED',
+        connected_at=NOW(), last_verified_at=NOW(), updated_at=NOW()
+      RETURNING retailer_code, retailer_name, last_sync_at
+    `, [userId, verified.retailerCode, verified.retailerName, credentials.clientId, encryptedSecret]);
+
+    // Branch IDs are retailer-specific and are not referenced by historical
+    // invoices. Replace this small cache immediately when credentials change,
+    // otherwise a receipt can be sent with a branch ID from the previous shop.
+    await client.query('DELETE FROM kiotvietbranch WHERE user_id=$1', [userId]);
+    for (const branch of verified.branches || []) await client.query(`
+      INSERT INTO kiotvietbranch(user_id,kiotviet_id,branch_name,address,contact_number,kiotviet_modified_at)
+      VALUES($1,$2,$3,$4,$5,$6)`, [userId, branch.id, branch.branchName || branch.name || `Branch ${branch.id}`,
+      branch.address || null, branch.contactNumber || null, branch.modifiedDate || null]);
+    await client.query('COMMIT');
+    return rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function loadConnectionConfig(pool, userId) {

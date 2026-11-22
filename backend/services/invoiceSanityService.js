@@ -1,5 +1,100 @@
 const LAYOUT_TYPES = ['SINGLE_UNIT_COLUMN', 'SPLIT_QUANTITY_COLUMNS', 'FREE_FORM', 'UNKNOWN'];
 
+function parseVisibleMoney(value) {
+  if (typeof value !== 'string') return null;
+  let text = value.trim().toLocaleLowerCase('vi-VN')
+    .replace(/(?:vnd|vnđ|đồng|đ|₫)/g, '')
+    .replace(/\s+/g, '');
+  if (!text) return null;
+  const hasThousandSuffix = /(?:k|nghìn|ngàn)$/.test(text);
+  text = text.replace(/(?:k|nghìn|ngàn)$/, '');
+  if (!/^-?[\d.,]+$/.test(text)) return null;
+  const separators = text.match(/[.,]/g) || [];
+  let number;
+  if (separators.length && /[.,]\d{3}(?:[.,]\d{3})*$/.test(text)) {
+    number = Number(text.replace(/[.,]/g, ''));
+  } else if (separators.length === 1) {
+    number = Number(text.replace(',', '.'));
+  } else {
+    number = Number(text.replace(/[.,]/g, ''));
+  }
+  if (!Number.isFinite(number)) return null;
+  return number * (hasThousandSuffix ? 1000 : 1);
+}
+
+function normalizeScaledValue(value, rawValue, scale) {
+  const numeric = value === null || value === undefined ? null : Number(value);
+  const raw = parseVisibleMoney(rawValue);
+  if (!Number.isFinite(numeric) || !Number.isFinite(raw) || scale !== 1000) return { value, applied: false };
+  const rawText = String(rawValue).trim().toLocaleLowerCase('vi-VN').replace(/\s+/g, '');
+  const explicitlyScaled = /(?:k|nghìn|ngàn)(?:vnd|vnđ|đồng|đ|₫)?$/.test(rawText)
+    || Math.abs(raw) >= 1000
+    || /[.,]\d{3}(?:[.,]\d{3})*(?:vnd|vnđ|đồng|đ|₫)?$/.test(rawText);
+  // Explicit suffixes and formatted/full amounts are themselves reliable VND evidence.
+  if (explicitlyScaled) return closeMoney(numeric, raw)
+    ? { value: numeric, applied: false }
+    : { value: raw, applied: true };
+  if (closeMoney(numeric, raw * 1000)) return { value: numeric, applied: false };
+  if (closeMoney(numeric, raw)) return { value: raw * 1000, applied: true };
+  return { value, applied: false };
+}
+
+function arithmeticMoneyCandidate(item) {
+  const quantity = finitePositive(item.quantity);
+  const factor = finitePositive(item.package_quantity) || 1;
+  const price = finitePositive(item.unit_price);
+  const total = finitePositive(item.total_price);
+  if (!quantity || !price || !total) return null;
+  const multiplier = quantity * factor;
+  if (closeMoney(multiplier * price * 1000, total)) return { field: 'unit_price', value: price * 1000 };
+  if (closeMoney(multiplier * price, total * 1000)) return { field: 'total_price', value: total * 1000 };
+  return null;
+}
+
+function normalizeInvoiceMoney(invoice) {
+  const normalized = { ...invoice, items: [] };
+  const issues = [];
+  for (const [index, source] of (invoice.items || []).entries()) {
+    const item = { ...source };
+    const price = normalizeScaledValue(item.unit_price, item.raw_unit_price, invoice.money_scale);
+    const total = normalizeScaledValue(item.total_price, item.raw_total_price, invoice.money_scale);
+    item.unit_price = price.value;
+    item.total_price = total.value;
+    const appliedFields = [];
+    if (price.applied) appliedFields.push('đơn giá');
+    if (total.applied) appliedFields.push('thành tiền');
+    if (!appliedFields.length) {
+      const candidate = arithmeticMoneyCandidate(item);
+      if (candidate) {
+        item[candidate.field] = candidate.value;
+        appliedFields.push(candidate.field === 'unit_price' ? 'đơn giá' : 'thành tiền');
+      }
+    }
+    if (appliedFields.length) issues.push({
+      code: 'THOUSAND_VND_NORMALIZED', item_index: index, severity: 'info',
+      message: `Dòng ${index + 1}: đã chuẩn hóa ${appliedFields.join(' và ')} viết tắt theo đơn vị nghìn đồng.`,
+    });
+    normalized.items.push(item);
+  }
+  const totalAmount = normalizeScaledValue(invoice.total_amount, invoice.raw_total_amount, invoice.money_scale);
+  normalized.total_amount = totalAmount.value;
+  let totalApplied = totalAmount.applied;
+  if (!totalApplied && finitePositive(normalized.total_amount)) {
+    const itemTotal = normalized.items
+      .filter((item) => item.line_status !== 'CANCELLED')
+      .reduce((sum, item) => sum + (finitePositive(item.total_price) || 0), 0);
+    if (itemTotal > 0 && closeMoney(normalized.total_amount * 1000, itemTotal)) {
+      normalized.total_amount *= 1000;
+      totalApplied = true;
+    }
+  }
+  if (totalApplied) issues.push({
+    code: 'THOUSAND_VND_TOTAL_NORMALIZED', severity: 'info',
+    message: 'Đã chuẩn hóa tổng tiền viết tắt theo đơn vị nghìn đồng.',
+  });
+  return { invoice: normalized, issues };
+}
+
 function finitePositive(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
@@ -78,16 +173,17 @@ function inspectLine(item, index) {
 }
 
 function inspectInvoice(invoice) {
+  const money = normalizeInvoiceMoney(invoice);
   const items = [];
-  const issues = [];
-  for (const [index, item] of (invoice.items || []).entries()) {
+  const issues = [...money.issues];
+  for (const [index, item] of (money.invoice.items || []).entries()) {
     const inspected = inspectLine(item, index);
     items.push(inspected.item);
     issues.push(...inspected.issues);
   }
   const normalized = {
-    ...invoice,
-    layout_type: LAYOUT_TYPES.includes(invoice.layout_type) ? invoice.layout_type : 'UNKNOWN',
+    ...money.invoice,
+    layout_type: LAYOUT_TYPES.includes(money.invoice.layout_type) ? money.invoice.layout_type : 'UNKNOWN',
     items,
   };
   return {
@@ -122,4 +218,4 @@ function readingsAgree(first, second) {
   return JSON.stringify(comparisonShape(first)) === JSON.stringify(comparisonShape(second));
 }
 
-module.exports = { inspectInvoice, readingsAgree, closeMoney };
+module.exports = { inspectInvoice, readingsAgree, closeMoney, parseVisibleMoney, normalizeInvoiceMoney };
